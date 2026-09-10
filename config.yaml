@@ -1,0 +1,78 @@
+# SMC Map Inventory — runtime configuration.
+# Everything here is human-editable; no code changes are needed to alter scope,
+# concurrency, rate limits, caps or screenshot policy.
+
+scope:
+  crawl_allowlist:              # hosts crawled fully (every path)
+    - www.smcgov.org
+  normalize_to_www:             # bare host -> www host (treated as the same site)
+    smcgov.org: www.smcgov.org
+  never_crawl:                  # never enqueued, but ALWAYS recorded when referenced
+    - "*.smcgov.org"            # gis., data., youth., jobs., hr., ...
+    - "*"                       # everything else
+  record_always: true           # any map found anywhere is a finding, regardless of host
+
+seeds:
+  homepage: https://www.smcgov.org/
+  sitemaps:
+    - https://www.smcgov.org/sitemap.xml
+  robots: https://www.smcgov.org/robots.txt
+
+inventory:
+  max_urls: 50000               # runaway guard; logged loudly when reached
+  bfs_link_crawl: true          # BFS same-host link discovery seeded from homepage + sitemaps
+  run_tier1_during_crawl: true  # the BFS fetch doubles as tier-1 static detection (saves a full refetch)
+  skip_extensions: [pdf, jpg, jpeg, png, gif, svg, webp, zip, doc, docx, xls, xlsx, ppt, pptx, csv, mp4, mp3, ics, xml, rss, json, txt]
+  strip_query_params: ["utm_*", fbclid, gclid, mc_cid, mc_eid, dclid, msclkid]
+
+http:
+  user_agent: "SMC-Map-Inventory/1.0 (internal web audit; contact: <FILL IN>)"
+  requests_per_second_per_host: 2   # rate limit applies PER HOST, not globally
+  timeout_ms: 30000
+  max_retries: 3
+  retry_backoff_ms: 15000            # exponential: 15s, 30s, 60s
+  respect_robots: true
+  max_html_bytes: 5000000
+
+scan:
+  concurrency: 3                     # browser contexts / workers (3-5 recommended)
+  tier2_sample_rate: 0.20            # random sample of tier-1 misses that also get rendered
+  tier2_networkidle_timeout_ms: 30000
+  tier2_max_clicks: 10
+  tier2_scroll_step_px: 800
+  tier2_scroll_pause_ms: 250
+  tier2_settle_ms: 1500
+  context_recycle_pages: 200         # recycle browser contexts to bound memory growth
+  stale_in_progress_minutes: 10      # reset in_progress rows older than this on startup
+  max_runtime_minutes: 0             # 0 = unbounded; set to bound an overnight run
+  viewport: { width: 1366, height: 900 }
+  abort_matched_resource_types: [image, media, font]   # record then abort these (tiles); scripts stay allowed
+  consent: auto                      # auto | on | off  (auto = read output/preflight.json)
+
+screenshots:
+  mode: identity                     # none | identity | all
+  dir: ./screenshots
+  max_images: 1000
+  jpeg_quality: 70
+
+arcgis:
+  org_host: smcmaps.maps.arcgis.com
+  org_slug: smcmaps
+  item_types:
+    - Web Map
+    - Web Mapping Application
+    - Dashboard
+    - StoryMap
+    - Web Experience
+    - Web Scene
+    - Hub Site Application
+    - Hub Page
+    - Form
+    - Instant App
+
+report:
+  dir: ./output
+  probe_api_keys: true               # single unauthenticated GET per key to detect referrer restriction
+  title: "San Mateo County — www.smcgov.org Map Application Inventory"
+
+database: ./inventory.sqlite

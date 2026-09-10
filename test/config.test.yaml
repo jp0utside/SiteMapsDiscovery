@@ -1,0 +1,43 @@
+# Test configuration pointing at the local fixture site (test/fixture-site/server.js on port 8765).
+scope:
+  crawl_allowlist: ["localhost:8765"]
+  normalize_to_www: { "127.0.0.1": "localhost" }
+  never_crawl: ["*.smcgov.org", "*"]
+  record_always: true
+seeds:
+  homepage: http://localhost:8765/
+  sitemaps: [http://localhost:8765/sitemap.xml]
+  robots: http://localhost:8765/robots.txt
+inventory:
+  max_urls: 50000
+  bfs_link_crawl: true
+  run_tier1_during_crawl: true
+  skip_extensions: [pdf, jpg, jpeg, png, gif, svg, webp, zip, doc, docx, xls, xlsx, ppt, pptx, csv, mp4, mp3]
+  strip_query_params: ["utm_*", fbclid, gclid, mc_cid, mc_eid]
+http:
+  user_agent: "SMC-Map-Inventory/1.0 (validation run)"
+  requests_per_second_per_host: 50
+  timeout_ms: 15000
+  max_retries: 3
+  retry_backoff_ms: 200
+  respect_robots: true
+scan:
+  concurrency: 3
+  tier2_sample_rate: 0.20
+  tier2_networkidle_timeout_ms: 10000
+  tier2_max_clicks: 10
+  tier2_scroll_step_px: 800
+  tier2_scroll_pause_ms: 50
+  tier2_settle_ms: 300
+  context_recycle_pages: 5
+  stale_in_progress_minutes: 10
+  max_runtime_minutes: 0
+  consent: auto
+screenshots: { mode: identity, dir: ./test/out/screenshots, max_images: 1000, jpeg_quality: 70 }
+arcgis:
+  org_host: smcmaps.maps.arcgis.com
+  org_base_url: http://localhost:8765
+  portal_base_url: http://localhost:8765
+  item_types: [Web Map, Web Mapping Application, Dashboard, StoryMap, Web Experience]
+report: { dir: ./test/out, probe_api_keys: false, title: "Validation run (fixture site)" }
+database: ./test/out/test.sqlite

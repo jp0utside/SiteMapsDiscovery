@@ -1,0 +1,258 @@
+# SMC Map Inventory — detection ruleset.
+# Every rule carries a vendor, a type and a confidence (high | medium | low).
+# Types: interactive_webmap | gis_application | story_map | static_map_image |
+#        embedded_third_party | thematic_chart_map | map_link_only | non_geographic
+# Edit freely; the scanner compiles this file at startup. See README "Extending the rules".
+
+version: 1
+
+# ---------------------------------------------------------------------------
+# NETWORK SIGNALS (strongest — survive minification and bundling)
+# `pattern` is a glob matched against the request hostname, or against
+# host+path when it contains a "/". `*` matches any run of characters.
+# ---------------------------------------------------------------------------
+network:
+  hosts:
+    - { pattern: "maps.googleapis.com",        vendor: google,        type: interactive_webmap, confidence: high }
+    - { pattern: "maps.gstatic.com",           vendor: google,        type: interactive_webmap, confidence: high }
+    - { pattern: "api.mapbox.com",             vendor: mapbox,        type: interactive_webmap, confidence: high }
+    - { pattern: "events.mapbox.com",          vendor: mapbox,        type: interactive_webmap, confidence: high }
+    - { pattern: "js.arcgis.com",              vendor: esri,          type: interactive_webmap, confidence: high }
+    - { pattern: "smcmaps.maps.arcgis.com",    vendor: esri,          type: gis_application,   confidence: high }
+    - { pattern: "*.arcgis.com",               vendor: esri,          type: gis_application,   confidence: medium }
+    - { pattern: "*.arcgisonline.com",         vendor: esri,          type: interactive_webmap, confidence: high }
+    - { pattern: "tile.openstreetmap.org",     vendor: osm,           type: interactive_webmap, confidence: high }
+    - { pattern: "*.tile.openstreetmap.org",   vendor: osm,           type: interactive_webmap, confidence: high }
+    - { pattern: "dev.virtualearth.net",       vendor: bing,          type: interactive_webmap, confidence: high }
+    - { pattern: "*.virtualearth.net",         vendor: bing,          type: interactive_webmap, confidence: medium }
+    - { pattern: "*.hereapi.com",              vendor: here,          type: interactive_webmap, confidence: high }
+    - { pattern: "api.tomtom.com",             vendor: tomtom,        type: interactive_webmap, confidence: high }
+    - { pattern: "*.cartocdn.com",             vendor: carto,         type: interactive_webmap, confidence: high }
+    - { pattern: "api.maptiler.com",           vendor: maptiler,      type: interactive_webmap, confidence: high }
+    - { pattern: "tiles.stadiamaps.com",       vendor: stadia,        type: interactive_webmap, confidence: high }
+    - { pattern: "*.thunderforest.com",        vendor: thunderforest, type: interactive_webmap, confidence: high }
+    - { pattern: "unpkg.com/leaflet*",         vendor: leaflet,       type: interactive_webmap, confidence: high }
+    - { pattern: "cdn.jsdelivr.net/npm/leaflet*", vendor: leaflet,    type: interactive_webmap, confidence: high }
+    - { pattern: "cdnjs.cloudflare.com/ajax/libs/leaflet/*", vendor: leaflet, type: interactive_webmap, confidence: high }
+    - { pattern: "unpkg.com/maplibre-gl*",     vendor: maplibre,      type: interactive_webmap, confidence: high }
+    - { pattern: "cdn.jsdelivr.net/npm/ol*",   vendor: openlayers,    type: interactive_webmap, confidence: medium }
+    - { pattern: "atlas.microsoft.com",        vendor: azure,         type: interactive_webmap, confidence: high }
+    - { pattern: "*.cesium.com",               vendor: cesium,        type: interactive_webmap, confidence: high }
+    - { pattern: "*.datawrapper.de",           vendor: datawrapper,   type: thematic_chart_map, confidence: low }
+    - { pattern: "*.dwcdn.net",                vendor: datawrapper,   type: thematic_chart_map, confidence: low }
+    - { pattern: "code.highcharts.com/maps/*", vendor: highcharts,    type: thematic_chart_map, confidence: high }
+    - { pattern: "code.highcharts.com/mapdata/*", vendor: highcharts, type: thematic_chart_map, confidence: high }
+    - { pattern: "public.tableau.com",         vendor: tableau,       type: embedded_third_party, confidence: low }
+    - { pattern: "app.powerbi.com",            vendor: powerbi,       type: embedded_third_party, confidence: low }
+    - { pattern: "storymaps.arcgis.com",       vendor: esri,          type: story_map,          confidence: high }
+
+  # Generic tile pattern — catches self-hosted and unknown vendors. Regex against the full URL.
+  tile_pattern:
+    regex: "/\\d{1,2}/\\d+/\\d+\\.(png|jpg|jpeg|webp|pbf|mvt)(\\?|$)"
+    vendor: unknown-tiles
+    type: interactive_webmap
+    confidence: medium
+
+  # OGC and self-hosted services. Regex against the full URL (case-insensitive).
+  paths:
+    - { regex: "[?&]request=GetMap\\b",           vendor: ogc,       type: interactive_webmap, confidence: high }
+    - { regex: "[?&]request=GetCapabilities\\b",  vendor: ogc,       type: interactive_webmap, confidence: medium }
+    - { regex: "[?&]request=GetFeature\\b",       vendor: ogc,       type: interactive_webmap, confidence: medium }
+    - { regex: "/geoserver/",                     vendor: geoserver, type: interactive_webmap, confidence: high }
+    - { regex: "/mapserver/",                     vendor: mapserver, type: interactive_webmap, confidence: high }
+    - { regex: "/arcgis/rest/services/",          vendor: esri,      type: interactive_webmap, confidence: high }
+    - { regex: "/wms(\\?|/|$)",                   vendor: ogc,       type: interactive_webmap, confidence: medium }
+    - { regex: "/wmts(\\?|/|$)",                  vendor: ogc,       type: interactive_webmap, confidence: medium }
+    - { regex: "/wfs(\\?|/|$)",                   vendor: ogc,       type: interactive_webmap, confidence: medium }
+    - { regex: "/VectorTileServer/",              vendor: esri,      type: interactive_webmap, confidence: high }
+
+  # Static map APIs (a rendered image, no interaction).
+  static_map_apis:
+    - { regex: "maps\\.googleapis\\.com/maps/api/staticmap", vendor: google, type: static_map_image, confidence: high }
+    - { regex: "api\\.mapbox\\.com/styles/v1/[^/]+/[^/]+/static/", vendor: mapbox, type: static_map_image, confidence: high }
+    - { regex: "dev\\.virtualearth\\.net/REST/v1/Imagery/Map", vendor: bing, type: static_map_image, confidence: high }
+    - { regex: "api\\.maptiler\\.com/maps/[^/]+/static/", vendor: maptiler, type: static_map_image, confidence: high }
+
+# ---------------------------------------------------------------------------
+# EMBED PATTERNS — matched against iframe src (embed) and anchor href (link).
+# When matched on an <a href> the finding type becomes map_link_only.
+# ---------------------------------------------------------------------------
+embeds:
+  - { regex: "arcgis\\.com/apps/webappviewer",   vendor: esri,     type: gis_application, confidence: high, label: "ArcGIS Web AppBuilder" }
+  - { regex: "arcgis\\.com/apps/experience/",    vendor: esri,     type: gis_application, confidence: high, label: "ArcGIS Experience Builder" }
+  - { regex: "arcgis\\.com/apps/dashboards/",    vendor: esri,     type: gis_application, confidence: high, label: "ArcGIS Dashboards" }
+  - { regex: "arcgis\\.com/apps/opsdashboard/",  vendor: esri,     type: gis_application, confidence: high, label: "ArcGIS Operations Dashboard" }
+  - { regex: "arcgis\\.com/apps/instant/",       vendor: esri,     type: gis_application, confidence: high, label: "ArcGIS Instant App" }
+  - { regex: "arcgis\\.com/apps/mapviewer/",     vendor: esri,     type: interactive_webmap, confidence: high, label: "ArcGIS Map Viewer" }
+  - { regex: "arcgis\\.com/apps/View/",          vendor: esri,     type: gis_application, confidence: high, label: "ArcGIS Configurable App" }
+  - { regex: "arcgis\\.com/apps/Embed/",         vendor: esri,     type: interactive_webmap, confidence: high, label: "ArcGIS Embed" }
+  - { regex: "arcgis\\.com/apps/[A-Za-z0-9_-]+/index\\.html", vendor: esri, type: gis_application, confidence: medium, label: "ArcGIS Configurable App" }
+  - { regex: "arcgis\\.com/apps/",               vendor: esri,     type: gis_application, confidence: medium, label: "ArcGIS App" }
+  - { regex: "arcgis\\.com/home/webmap/viewer",  vendor: esri,     type: interactive_webmap, confidence: high, label: "ArcGIS Classic Map Viewer" }
+  - { regex: "arcgis\\.com/home/item\\.html",    vendor: esri,     type: gis_application, confidence: medium, label: "ArcGIS Item" }
+  - { regex: "storymaps\\.arcgis\\.com/",        vendor: esri,     type: story_map,      confidence: high, label: "ArcGIS StoryMaps" }
+  - { regex: "arcgis\\.com/apps/(MapJournal|MapSeries|Cascade|MapTour|Shortlist|StoryMap)", vendor: esri, type: story_map, confidence: high, label: "ArcGIS Classic Story Map" }
+  - { regex: "arcg\\.is/",                       vendor: esri,     type: gis_application, confidence: medium, label: "ArcGIS short link" }
+  - { regex: "google\\.com/maps/embed",          vendor: google,   type: interactive_webmap, confidence: high, label: "Google Maps Embed" }
+  - { regex: "google\\.com/maps/d/",             vendor: google,   type: interactive_webmap, confidence: high, label: "Google My Maps" }
+  - { regex: "google\\.com/maps(/|\\?|$)",       vendor: google,   type: interactive_webmap, confidence: medium, label: "Google Maps" }
+  - { regex: "goo\\.gl/maps/",                   vendor: google,   type: interactive_webmap, confidence: medium, label: "Google Maps short link" }
+  - { regex: "maps\\.app\\.goo\\.gl/",           vendor: google,   type: interactive_webmap, confidence: medium, label: "Google Maps short link" }
+  - { regex: "maps\\.google\\.com/",             vendor: google,   type: interactive_webmap, confidence: medium, label: "Google Maps" }
+  - { regex: "openstreetmap\\.org/export/embed", vendor: osm,      type: interactive_webmap, confidence: high, label: "OSM Embed" }
+  - { regex: "openstreetmap\\.org/",             vendor: osm,      type: interactive_webmap, confidence: medium, label: "OpenStreetMap" }
+  - { regex: "/Html5Viewer/",                    vendor: vertigis, type: gis_application, confidence: high, label: "VertiGIS / Geocortex Html5Viewer" }
+  - { regex: "/Geocortex/",                      vendor: vertigis, type: gis_application, confidence: high, label: "Geocortex" }
+  - { regex: "public\\.tableau\\.com/",          vendor: tableau,  type: embedded_third_party, confidence: medium, label: "Tableau Public" }
+  - { regex: "app\\.powerbi\\.com/",             vendor: powerbi,  type: embedded_third_party, confidence: medium, label: "Power BI" }
+  - { regex: "datawrapper\\.dwcdn\\.net/",       vendor: datawrapper, type: thematic_chart_map, confidence: low, label: "Datawrapper" }
+  - { regex: "public\\.flourish\\.studio/",      vendor: flourish, type: thematic_chart_map, confidence: low, label: "Flourish" }
+  - { regex: "bing\\.com/maps",                  vendor: bing,     type: interactive_webmap, confidence: medium, label: "Bing Maps" }
+  - { regex: "mapbox\\.com/",                    vendor: mapbox,   type: interactive_webmap, confidence: low, label: "Mapbox" }
+  - { regex: "gis\\.smcgov\\.org/",              vendor: smc-gis,  type: gis_application, confidence: medium, label: "County GIS host" }
+  - { regex: "/arcgis/(apps|rest)/",             vendor: esri,     type: gis_application, confidence: medium, label: "ArcGIS Enterprise" }
+  - { regex: "\\bmaps?\\.[a-z0-9-]+\\.(gov|org|us)/", vendor: unknown, type: interactive_webmap, confidence: low, label: "Map subdomain" }
+
+# ---------------------------------------------------------------------------
+# DOM AND GLOBAL SIGNALS (evaluated in the rendered page; shadow roots pierced)
+# ---------------------------------------------------------------------------
+globals:
+  - { name: L,               expr: "typeof L!=='undefined' && L && typeof L.map==='function'", vendor: leaflet,    type: interactive_webmap, confidence: high }
+  - { name: mapboxgl,        expr: "typeof mapboxgl!=='undefined' && !!mapboxgl",             vendor: mapbox,     type: interactive_webmap, confidence: high }
+  - { name: maplibregl,      expr: "typeof maplibregl!=='undefined' && !!maplibregl",         vendor: maplibre,   type: interactive_webmap, confidence: high }
+  - { name: google.maps,     expr: "typeof google!=='undefined' && google && !!google.maps",  vendor: google,     type: interactive_webmap, confidence: high }
+  - { name: ol,              expr: "typeof ol!=='undefined' && ol && (!!ol.Map || !!ol.map)",  vendor: openlayers, type: interactive_webmap, confidence: high }
+  - { name: Cesium,          expr: "typeof Cesium!=='undefined' && !!Cesium",                 vendor: cesium,     type: interactive_webmap, confidence: high }
+  - { name: H,               expr: "typeof H!=='undefined' && H && !!H.Map",                  vendor: here,       type: interactive_webmap, confidence: high }
+  - { name: Microsoft.Maps,  expr: "typeof Microsoft!=='undefined' && Microsoft && !!Microsoft.Maps", vendor: bing, type: interactive_webmap, confidence: high }
+  - { name: atlas,           expr: "typeof atlas!=='undefined' && atlas && !!atlas.Map",      vendor: azure,      type: interactive_webmap, confidence: high }
+  - { name: tt,              expr: "typeof tt!=='undefined' && tt && !!tt.map",               vendor: tomtom,     type: interactive_webmap, confidence: high }
+  - { name: esri,            expr: "typeof esri!=='undefined' && !!esri",                     vendor: esri,       type: interactive_webmap, confidence: high }
+  - { name: require+dojo,    expr: "typeof require==='function' && typeof dojo!=='undefined' && !!dojo", vendor: esri, type: interactive_webmap, confidence: medium }
+  - { name: Highcharts.maps, expr: "typeof Highcharts!=='undefined' && Highcharts && !!Highcharts.mapChart", vendor: highcharts, type: thematic_chart_map, confidence: high }
+  - { name: d3.geo,          expr: "typeof d3!=='undefined' && d3 && (typeof d3.geoPath==='function' || (d3.geo && typeof d3.geo.path==='function'))", vendor: d3, type: thematic_chart_map, confidence: low }
+  - { name: Plotly.geo,      expr: "typeof Plotly!=='undefined' && Plotly && !!Plotly", vendor: plotly, type: thematic_chart_map, confidence: low }
+  - { name: Datawrapper,     expr: "typeof datawrapper!=='undefined' && !!datawrapper",       vendor: datawrapper, type: thematic_chart_map, confidence: medium }
+
+selectors:
+  - { selector: ".leaflet-container",           vendor: leaflet,    type: interactive_webmap, confidence: high }
+  - { selector: ".mapboxgl-map",                vendor: mapbox,     type: interactive_webmap, confidence: high }
+  - { selector: ".maplibregl-map",              vendor: maplibre,   type: interactive_webmap, confidence: high }
+  - { selector: ".ol-viewport",                 vendor: openlayers, type: interactive_webmap, confidence: high }
+  - { selector: ".esri-view",                   vendor: esri,       type: interactive_webmap, confidence: high }
+  - { selector: ".esri-map",                    vendor: esri,       type: interactive_webmap, confidence: high }
+  - { selector: ".esriMapContainer",            vendor: esri,       type: interactive_webmap, confidence: high }
+  - { selector: ".gm-style",                    vendor: google,     type: interactive_webmap, confidence: high }
+  - { selector: "gmp-map",                      vendor: google,     type: interactive_webmap, confidence: high }
+  - { selector: ".cesium-viewer",               vendor: cesium,     type: interactive_webmap, confidence: high }
+  - { selector: ".H_imprint, .H_ui",            vendor: here,       type: interactive_webmap, confidence: high }
+  - { selector: ".atlas-map",                   vendor: azure,      type: interactive_webmap, confidence: medium }
+  - { selector: ".highcharts-map-series",       vendor: highcharts, type: thematic_chart_map, confidence: high }
+  - { selector: ".datawrapper-map, .dw-chart",  vendor: datawrapper, type: thematic_chart_map, confidence: low }
+  - { selector: ".js-plotly-plot .geo",         vendor: plotly,     type: thematic_chart_map, confidence: medium }
+  - { selector: "[class*=\"map-canvas\"]",      vendor: unknown,    type: interactive_webmap, confidence: low }
+  - { selector: "[id*=\"map\"][class*=\"container\"]", vendor: unknown, type: interactive_webmap, confidence: low }
+
+# ---------------------------------------------------------------------------
+# STATIC HTML SOURCE HINTS (tier 1) — regex against the raw HTML, case-insensitive.
+# ---------------------------------------------------------------------------
+static_html:
+  - { regex: "\\bL\\.map\\s*\\(",                          vendor: leaflet,    type: interactive_webmap, confidence: medium }
+  - { regex: "new\\s+google\\.maps\\.Map\\b",              vendor: google,     type: interactive_webmap, confidence: high }
+  - { regex: "new\\s+mapboxgl\\.Map\\b",                   vendor: mapbox,     type: interactive_webmap, confidence: high }
+  - { regex: "new\\s+maplibregl\\.Map\\b",                 vendor: maplibre,   type: interactive_webmap, confidence: high }
+  - { regex: "new\\s+ol\\.Map\\b",                         vendor: openlayers, type: interactive_webmap, confidence: high }
+  - { regex: "esri/(Map|views/MapView|WebMap)\\b",         vendor: esri,       type: interactive_webmap, confidence: medium }
+  - { regex: "Highcharts\\.mapChart\\b",                   vendor: highcharts, type: thematic_chart_map, confidence: high }
+  - { regex: "d3\\.geo(Path|Mercator|Albers)\\b",          vendor: d3,         type: thematic_chart_map, confidence: medium }
+  - { regex: "class=\"[^\"]*\\bleaflet-container\\b",      vendor: leaflet,    type: interactive_webmap, confidence: high }
+  - { regex: "class=\"[^\"]*\\bmapboxgl-map\\b",           vendor: mapbox,     type: interactive_webmap, confidence: high }
+  - { regex: "class=\"[^\"]*\\bgm-style\\b",               vendor: google,     type: interactive_webmap, confidence: high }
+  - { regex: "<gmp-map\\b",                                vendor: google,     type: interactive_webmap, confidence: high }
+  - { regex: "data-map-(id|config|lat|lng|center)\\b",     vendor: unknown,    type: interactive_webmap, confidence: low }
+  - { regex: "mapbox://styles/[^\"'\\s]+",                vendor: mapbox,     type: interactive_webmap, confidence: high }
+
+# ---------------------------------------------------------------------------
+# TIER-2 ELIGIBILITY — URLs whose path or title match these get rendered even
+# when tier 1 misses. Case-insensitive regex fragments joined with "|".
+# ---------------------------------------------------------------------------
+map_adjacent:
+  patterns: [map, gis, viewer, locator, explorer, dashboard, find, where, location, parcel, zoning, district, boundary]
+
+# ---------------------------------------------------------------------------
+# TIER-2 INTERACTION
+# ---------------------------------------------------------------------------
+interaction:
+  click_text_regex: "\\b(map|view map|show map|locator|directions)\\b"
+  control_selectors:
+    - "[role=tab]"
+    - "[aria-expanded=false]"
+    - "details:not([open]) > summary"
+    - ".accordion-button.collapsed"
+    - ".accordion__title, .accordion-title, .accordion-header button"
+    - "[data-toggle=collapse], [data-bs-toggle=collapse], [data-toggle=tab], [data-bs-toggle=tab]"
+    - ".ui-tabs-anchor, .ui-accordion-header"
+
+# ---------------------------------------------------------------------------
+# PLACEMENT — ancestors matching these mean the finding is site chrome (nav/header/footer),
+# which collapses to a single site-wide application row in the report.
+# ---------------------------------------------------------------------------
+placement:
+  chrome_selectors:
+    - header
+    - nav
+    - footer
+    - "[role=navigation]"
+    - "[role=banner]"
+    - "[role=contentinfo]"
+    - "[role=menubar]"
+    - ".region-header"
+    - ".region-navigation"
+    - ".region-primary-menu"
+    - ".region-secondary-menu"
+    - ".region-footer"
+    - ".region-footer-first, .region-footer-second, .region-footer-third, .region-footer-fourth"
+    - ".region-pre-footer, .region-post-footer"
+    - ".region-branding"
+    - ".site-header, .site-footer, .site-nav"
+    - ".mega-menu, .megamenu, .mm-menu, .main-menu, .menu--main, .menu--footer"
+    - ".block-menu, .block-system-branding-block, .block-superfish, .block-we-megamenu"
+    - "#header, #footer, #navigation, #main-menu, #mega-menu, #block-mainnavigation, #block-footer"
+    - ".layout-container > header, .layout-container > footer"
+    - ".dialog-off-canvas-main-canvas > header, .dialog-off-canvas-main-canvas > footer"
+    - ".toolbar, #toolbar-administration, .skip-link"
+  main_content_selectors:   # used to break ties only; a match here overrides a chrome match found *above* it
+    - main
+    - "[role=main]"
+    - "#main-content, #main, #content, .main-content, .region-content, .node__content, .field--name-body, .layout-content, article"
+
+# Findings whose container/nearby text matches this look like floor plans / seating charts.
+non_geographic:
+  hint_regex: "\\b(floor ?plan|seating|seat map|seat chart|site plan|campus map|org chart|building map)\\b"
+
+# ---------------------------------------------------------------------------
+# IDENTITY — query params that identify an application (everything else is dropped
+# when building an iframe:<origin><path> identity key).
+# ---------------------------------------------------------------------------
+identity:
+  identifying_params: [id, appid, webmap, mid, app, config, layout, storymap, dashboard, pb, q, center, markers, path, style]
+  credential_params: [key, access_token, apikey, api_key, token]
+
+# ---------------------------------------------------------------------------
+# CONSENT MANAGEMENT PLATFORM signals (preflight)
+# ---------------------------------------------------------------------------
+cmp:
+  globals: ["__tcfapi", "__gpp", "__uspapi", "OneTrust", "Cookiebot", "truste", "UC_UI", "Osano", "Termly", "_iub"]
+  asset_patterns: ["cookielaw.org", "otSDKStub.js", "cookiebot.com", "trustarc.com", "usercentrics.eu", "privacy-center.io", "privacy-mgmt.com", "osano.com", "termly.io", "cookieyes.com", "iubenda.com", "cookie-script.com", "cookieconsent"]
+  gtag_consent_regex: "gtag\\s*\\(\\s*['\"]consent['\"]\\s*,\\s*['\"]default['\"]"
+  accept_button_regex: "^(accept( all)?( cookies)?|i accept|agree|i agree|allow( all)?( cookies)?|got it|ok(ay)?|yes|continue)$"
+  consent_cookies:
+    - { name: OptanonAlertBoxClosed, value: "2024-01-01T00:00:00.000Z" }
+    - { name: OptanonConsent,        value: "isGpcEnabled=0&groups=C0001:1,C0002:1,C0003:1,C0004:1" }
+    - { name: CookieConsent,         value: "{stamp:'x',necessary:true,preferences:true,statistics:true,marketing:true,method:'explicit',ver:1}" }
+    - { name: cookieconsent_status,  value: allow }
+    - { name: cookie_consent,        value: "true" }
+    - { name: cookies_accepted,      value: "true" }
+    - { name: euconsent-v2,          value: "CPxxxxx" }
+    - { name: cmplz_consent_status,  value: allow }
+    - { name: cmplz_marketing,       value: allow }
