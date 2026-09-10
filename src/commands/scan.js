@@ -83,7 +83,7 @@ export async function scan(opts) {
   const consentCookies = consent.enabled ? (rules.cmp.consent_cookies || []).map(c => ({ name: c.name, value: c.value, domain: hostOf(cfg.seeds.homepage), path: '/' })) : null;
 
   const t0 = Date.now(); const deadline = cfg.scan.max_runtime_minutes ? t0 + cfg.scan.max_runtime_minutes * 60000 : Infinity;
-  const total = totalStmt.get().c; let completed = 0, hits = 0, rendered = 0, failed = 0, skipped = 0;
+  let completed = 0, hits = 0, rendered = 0, failed = 0, skipped = 0;
   let stopping = false; const inFlight = new Set();
   const onSig = () => { if (stopping) { log.warn('second Ctrl-C: exiting immediately; in_progress rows will be reset on next start'); for (const u of inFlight) upd.release.run(u); process.exit(130); } stopping = true; log.warn('Ctrl-C: no new pages will be claimed; waiting for in-flight pages (press again to force).'); };
   process.on('SIGINT', onSig); process.on('SIGTERM', onSig);
@@ -91,6 +91,7 @@ export async function scan(opts) {
   const only = onlyList ? new Set(onlyList) : null;
   if (only) for (const u of only) { db.prepare(`INSERT OR IGNORE INTO urls(url, source, discovered_at, status) VALUES (?,?,?,'pending')`).run(u, 'manual', now()); db.prepare(`UPDATE urls SET status='pending', tier1_done=0, tier2_done=0, attempts=0, retry_after=NULL, skip_reason=NULL WHERE url=?`).run(u); }
 
+  const total = totalStmt.get().c;
   const progress = () => {
     const el = Date.now() - t0; const rate = completed ? el / completed : 0; const rem = Math.max(0, remainingStmt.get().c);
     log.info(`progress: ${completed}/${total} done | hits ${hits} (${completed ? (100 * hits / completed).toFixed(1) : 0}%) | rendered ${rendered} | failed ${failed} skipped ${skipped} | elapsed ${fmtDuration(el)} | ETA ${fmtDuration(rem * rate)}`);
