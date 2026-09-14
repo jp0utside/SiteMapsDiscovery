@@ -26,7 +26,7 @@ inventory:
   strip_query_params: ["utm_*", fbclid, gclid, mc_cid, mc_eid, dclid, msclkid]
 
 http:
-  user_agent: "SMC-Map-Inventory/1.0 (internal web audit; contact: <FILL IN>)"
+  user_agent: "SMC-Map-Inventory/1.0 (internal web audit; contact: inventory@smcgis.org)"
   requests_per_second_per_host: 2   # rate limit applies PER HOST, not globally
   timeout_ms: 30000
   max_retries: 3
