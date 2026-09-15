@@ -178,3 +178,114 @@ No WAF responses, consent banners, page timeouts, or redirects to other hosts we
 
 The full crawl was not launched. That decision rests with a human after the security/network
 team has been notified.
+
+## 9. Decisions before the full crawl (review of 2026-09-14)
+
+Review of the results above, with the decisions they raise, the implications of each, and the
+recommendation reached in discussion. Items marked **open** still need a human decision; items
+marked **agreed** are ready to implement.
+
+### 9.1 Crawl-delay: 10 — **open**
+
+robots.txt asks for 10 seconds between requests. The tool parses the directive
+(`src/lib/robots.js`) but nothing enforces it; the per-host limiter runs at
+`http.requests_per_second_per_host = 2`, about 20× the requested pace. No WAF or rate limiter
+reacted during validation (236 pages, all HTTP 200).
+
+Implications:
+
+| Rate | Tier 1 (11,584 fetches) | Tier 2 renders | Total wall clock |
+|---|---|---|---|
+| 2 req/s, concurrency 3 (as validated) | ~1.6 h | ~7,200 today / ~2,900 after §9.2 | 6.5–12 h today; **~4–5 h after §9.2** |
+| Crawl-delay 10 (one page fetch or navigation per 10 s) | ~32 h | ~20 h today / ~8 h after §9.2 | ~50 h today; **~40 h after §9.2** |
+
+The floor under the slow option is tier 1: every one of the 11,584 URLs must be fetched once,
+and no detection change can reduce that. Only crawling fewer URLs would, which contradicts the
+full-crawl requirement.
+
+Interpretation if the delay is honoured: 10 s between *page* fetches and *page* navigations,
+with a rendered page's own CSS/JS/image loads from the host treated as part of that page.
+Applying the delay to every subresource would make tier 2 impossible.
+
+Recommendation: since the county owns the site and this is its own audit, ask the web/security
+team to explicitly approve the 2 req/s rate and record that approval, rather than running for
+two days. Either way the choice should be deliberate: add a config switch
+(`http.respect_crawl_delay`) that enforces the directive when on, and log the effective rate and
+ETA at startup so the run announces which mode it is in.
+
+### 9.2 "Get Directions" links and tier-2 scheduling — **agreed**
+
+Two distinct changes were discussed; they are easy to conflate.
+
+**What a link-only finding is.** An ordinary `<a href>` on a www.smcgov.org page whose target
+matches a map-application pattern. The page itself contains no map. Three kinds turned up:
+
+1. Links to genuine county applications (the mega-menu "Road Closures" app, the `/tsd/gis`
+   links to the Property Records and Beach Monitoring viewers, the zoning page's "View Planning
+   GIS"). These are real applications and the spec asks that they be recorded and flagged
+   `map_link_only`, not dropped.
+2. "Get Directions" links to `google.com/maps?q=<address>` on office and contact pages.
+   306 of the 312 link-only findings in the sample were these; each address became its own
+   application row, so 73 of the 82 application rows are noise.
+3. Attribution links (`© Mapbox`, `© OpenStreetMap`) that map libraries inject inside the map
+   itself. These caused the single fixture false positive on the local machine and would recur
+   on any live Leaflet/Mapbox page.
+
+**Change A — collapse the identities (reporting only).** Fold every Google Maps directions,
+place and search link into one flagged application ("Google Maps directions links") with an
+occurrence count instead of one row per address. Ignore links inside attribution controls.
+This changes how findings are keyed and what the CSVs show. It has **no effect** on network
+calls, CPU or run time.
+
+**Change B — link-only findings no longer count as a tier-1 hit.** Today any `main_content`
+finding, including a directions link, marks the page a hit, and every hit is rendered in
+Chromium. In the 102-page sample that made 54% of pages hits when only about 5% had an embedded
+map. After the change a page is rendered only if it has an embedded/in-page map signal, matches
+the map-adjacent path/title list, or falls in the 20% random sample. Estimated renders drop from
+~7,200 to ~2,900 (roughly 60% less tier-2 work). Nothing is lost: a link to a county ArcGIS app
+is visible in the static HTML, so tier 1 still records it with the correct identity.
+
+Change B is the lever on effort and is what brings the 2 req/s run down to a single afternoon.
+It does **not** make the Crawl-delay option feasible (see §9.1): it trims tier 2 from ~20 h to
+~8 h under that option, but the 32 h tier-1 floor is untouched.
+
+Kind 1 above is unaffected by either change and remains in the inventory.
+
+### 9.3 Identity-key cosmetics — **agreed**
+
+- The `iframe:` prefix on link-only keys (e.g. `iframe:gis.smcgov.org/Html5Viewer/`) matches the
+  spec's own expected identity for the mega-menu link, so it stays. It denotes the
+  "origin + path" identity rule regardless of whether the target was embedded or linked; document
+  this in the README.
+- The trailing-slash duplicate (`…/PAGES/HSA` vs `…/PAGES/HSA/`) is a real bug: normalise the
+  path in identity keys so both forms produce one application.
+
+### 9.4 Content finding for the final report — **noted**
+
+The site-wide "Road Closures" menu item on every page points at the 2020 "CZU Fire - Road
+Closure Map" (`c7075a28…`). This is an inventory finding about the site, not a tool issue; it
+belongs in the narrative of the final report.
+
+### 9.5 Fixes to make before the full run — **agreed**
+
+- Ignore links inside map attribution controls (`.leaflet-control-attribution`,
+  `.mapboxgl-ctrl-attrib`, `.ol-attribution`, `.esri-attribution`, `.gm-style-cc`, and links
+  whose text begins with "©").
+- Enforce the Node ≥ 20 requirement at startup with a clear message (the local machine's
+  default Node 18 failed inside undici).
+- Make `--limit` exact instead of overshooting by up to the concurrency count.
+- Fix the SQL quoting in the runbook's inline `node -e` queries (single quotes for string
+  literals).
+- README note on the identity-key convention (§9.3).
+- Config switch and startup logging for Crawl-delay (§9.1), whichever way that decision goes.
+
+### 9.6 Steps from here
+
+1. Settle §9.1 with the site owner; confirm §9.2 (both changes) — recommendation: apply both.
+2. Apply the fixes in §9.2, §9.3 and §9.5; re-run the fixture harness; push for a second PR.
+3. Local agent re-runs runbook Step 1 and the 100-page timing sample to confirm the reduced
+   tier-2 share and produce a fresh duration estimate.
+4. Notify the security/network team with the User-Agent string, the approved rate, and the
+   planned window.
+5. Launch `inventory`, then `scan` with `--max-runtime` sized to the window (resume as needed),
+   then `arcgis` and `report`.
