@@ -23,7 +23,7 @@ export function detectStatic(html, pageUrl, rules) {
       const target = abs(v); if (!target) continue;
       const rule = rules.matchEmbedUrl(target) || (rules.matchRequestUrl(target) || {}).rule;
       if (!rule) continue;
-      const id = resolveIdentity(target, rules); if (!id) continue;
+      const id = resolveIdentity(target, rules, rule); if (!id) continue;
       const title = $(el).attr('title') || null;
       push(finding({ pageUrl, id, rule, type: rule.type, signal_type: 'iframe', signal_value: target, target, placement: classifyPlacementCheerio($, el, rules), container: cssPathCheerio($, el), width: dim($(el).attr('width')), height: dim($(el).attr('height')), title, nonGeo: nonGeoHint($, el, rules) }));
       break;
@@ -34,8 +34,9 @@ export function detectStatic(html, pageUrl, rules) {
     const target = abs($(el).attr('href')); if (!target) return;
     if (/^(mailto|tel|javascript):/i.test($(el).attr('href'))) return;
     const rule = rules.matchEmbedUrl(target); if (!rule) return;
-    const id = resolveIdentity(target, rules); if (!id) return;
     const text = $(el).text().trim().replace(/\s+/g, ' ').slice(0, 120) || $(el).attr('aria-label') || $(el).attr('title') || null;
+    if (isAttributionLink($, el, text, rules)) return;
+    const id = resolveIdentity(target, rules, rule); if (!id) return;
     push(finding({ pageUrl, id, rule, type: 'map_link_only', signal_type: 'link', signal_value: target, target, placement: classifyPlacementCheerio($, el, rules), container: cssPathCheerio($, el), title: text }));
   });
   // Static map images.
@@ -61,7 +62,7 @@ export function detectStatic(html, pageUrl, rules) {
   $('[data-src],[data-url],[data-href],[data-iframe-src],[data-embed]').not('iframe,img,a,object,embed,source').each((_, el) => {
     for (const a of URL_ATTRS) {
       const v = $(el).attr(a); if (!v) continue; const target = abs(v); if (!target) continue;
-      const rule = rules.matchEmbedUrl(target); if (!rule) continue; const id = resolveIdentity(target, rules); if (!id) continue;
+      const rule = rules.matchEmbedUrl(target); if (!rule) continue; const id = resolveIdentity(target, rules, rule); if (!id) continue;
       push(finding({ pageUrl, id, rule, type: rule.type, signal_type: 'static_html', signal_value: `${a}=${target}`, target, placement: classifyPlacementCheerio($, el, rules), container: cssPathCheerio($, el), confidence: 'medium' }));
     }
   });
@@ -79,7 +80,7 @@ export function detectStatic(html, pageUrl, rules) {
     const target = m[0].replace(/[.,;:]+$/, '').replace(/&amp;/g, '&');
     if (already.has(target)) continue;
     const rule = rules.matchEmbedUrl(target); if (!rule) continue;
-    const id = resolveIdentity(target, rules); if (!id) continue;
+    const id = resolveIdentity(target, rules, rule); if (!id) continue;
     already.add(target);
     push(finding({ pageUrl, id, rule, type: rule.type, signal_type: 'static_html', signal_value: target, target, placement: 'main_content', container: '*', confidence: 'low' }));
   }
@@ -90,6 +91,11 @@ export function detectStatic(html, pageUrl, rules) {
   return { title, findings, links };
 }
 
+function isAttributionLink($, el, text, rules) {
+  if (rules.ignoreLinkTextRegex && text && rules.ignoreLinkTextRegex.test(text)) return true;
+  for (const sel of rules.ignoreLinkSelectors || []) { try { if ($(el).closest(sel).length) return true; } catch {} }
+  return false;
+}
 function dim(v) { if (v == null) return null; const n = parseInt(String(v), 10); return isNaN(n) ? null : n; }
 function nonGeoHint($, el, rules) {
   const ctx = [$(el).attr('title'), $(el).attr('aria-label'), $(el).parent().text().slice(0, 300), $(el).closest('section,article,div').find('h1,h2,h3,figcaption').first().text()].filter(Boolean).join(' ');

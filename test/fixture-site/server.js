@@ -43,6 +43,8 @@ const pages = {
     <li><a href="/planning/gis-map-zoning-and-other-info-0">Zoning info</a></li>
     <li><a href="/tsd/gis">GIS</a></li>
     <li><a href="/hsa/find-services">Find services</a></li>
+    <li><a href="/hsa/contact">Contact</a></li>
+    <li><a href="/dpw/viewers">Viewers</a></li>
     <li><a href="/parks/seating">Seating</a></li>
     <li><a href="/about/shadow-map">Shadow</a></li>
     <li><a href="/tsd/tableau">Tableau</a></li>
@@ -62,10 +64,13 @@ const pages = {
   '/privacy-policy': chrome('Privacy Policy', `<h1>Privacy Policy</h1><p>Last updated 2014. Manage cookies via your browser settings.</p>`),
   '/planning/gis-map-zoning-and-other-info-0': chrome('GIS Map: Zoning and Other Info', `<h1>GIS Map: Zoning and Other Info</h1>
     <p>Open the <a href="https://smcmaps.maps.arcgis.com/apps/webappviewer/index.html?id=${ZONING}">interactive zoning map</a>.</p>
-    <img alt="Zoning overview map" width="600" height="300" src="https://maps.googleapis.com/maps/api/staticmap?center=37.5,-122.3&zoom=10&size=600x300&key=AIzaFAKEKEY123">`),
+    <img alt="Zoning overview map" width="600" height="300" src="https://maps.googleapis.com/maps/api/staticmap?center=37.5,-122.3&zoom=10&size=600x300&key=AIzaFAKEKEY123">
+    <p>Planning counter: 455 County Center, Redwood City. <a href="https://www.google.com/maps?q=455+County+Center+Redwood+City">Get Directions</a></p>`),
   '/tsd/gis': chrome('GIS', `<h1>Geographic Information Systems</h1><p>Our interactive map:</p><div id="county-map" style="height:400px"></div>
     <script src="/assets/fake-leaflet.js"></script><script>window.addEventListener('load', () => { L.map('county-map'); });</script>`),
-  '/hsa/find-services': chrome('Find Services Near You', `<h1>Find Services</h1><button id="showmap" type="button">Show map</button><div id="mapwrap"></div>
+  '/hsa/contact': chrome('Contact us', `<h1>Contact HSA</h1><p>See the <a href="https://smcmaps.maps.arcgis.com/apps/webappviewer/index.html?id=${ZONING}">zoning map</a> for district boundaries.</p>`),
+  '/dpw/viewers': chrome('Public Works viewers', `<h1>Viewers</h1><ul><li><a href="https://gis.smcgov.org/apps/publicviewer">Public viewer</a></li><li><a href="https://gis.smcgov.org/apps/publicviewer/">Public viewer (trailing slash)</a></li></ul>`),
+  '/hsa/find-services': chrome('Find Services Near You', `<h1>Find Services</h1><p><a href="https://www.google.com/maps/place/1+Tower+Rd+San+Mateo">Get Directions</a></p><button id="showmap" type="button">Show map</button><div id="mapwrap"></div>
     <script>document.getElementById('showmap').addEventListener('click', () => { const f = document.createElement('iframe'); f.src = 'https://www.google.com/maps/d/embed?mid=1XyZ_abc123&hl=en'; f.width = 640; f.height = 480; document.getElementById('mapwrap').appendChild(f); });</script>`),
   '/parks/seating': chrome('Seating chart', `<h1>Amphitheater seating chart</h1><figure><div id="seatmap" style="height:300px"></div><figcaption>Seat map — floor plan of the venue</figcaption></figure>
     <script src="/assets/fake-leaflet.js"></script><script>window.addEventListener('load', () => { L.map('seatmap', { crs: 'simple' }); });</script>`),
@@ -83,7 +88,7 @@ pages['/news/article-25'] = chrome('Article 25', `<h1>Article 25</h1><p>Only rea
 
 const sitemapUrls = Object.keys(pages).filter(p => !p.startsWith('/news/article-25'));
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
-const fakeLeaflet = `window.L = { map(id, o) { const el = document.getElementById(id); el.classList.add('leaflet-container'); for (let x = 0; x < 3; x++) for (let y = 0; y < 2; y++) { const i = new Image(); i.src = '/tiles/12/' + (655 + x) + '/' + (1583 + y) + '.png'; el.appendChild(i); } return { on(){} }; } };`;
+const fakeLeaflet = `window.L = { map(id, o) { const el = document.getElementById(id); el.classList.add('leaflet-container'); for (let x = 0; x < 3; x++) for (let y = 0; y < 2; y++) { const i = new Image(); i.src = '/tiles/12/' + (655 + x) + '/' + (1583 + y) + '.png'; el.appendChild(i); } const a = document.createElement('div'); a.className = 'leaflet-control-attribution'; a.innerHTML = '<a href="https://leafletjs.com">Leaflet</a> | &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'; el.appendChild(a); return { on(){} }; } };`;
 
 // Mock ArcGIS Online REST (public endpoints only).
 const orgItems = [
@@ -99,7 +104,7 @@ const server = http.createServer((req, res) => {
   const p = u.pathname;
   const send = (code, type, body, headers = {}) => { res.writeHead(code, { 'content-type': type, ...headers }); res.end(body); };
   const json = (o) => send(200, 'application/json', JSON.stringify(o));
-  if (p === '/robots.txt') return send(200, 'text/plain', `User-agent: *\nDisallow: /private/\nDisallow: /admin\nSitemap: ${BASE}/sitemap.xml\n`);
+  if (p === '/robots.txt') return send(200, 'text/plain', `User-agent: *\nDisallow: /private/\nDisallow: /admin\nCrawl-delay: 5\nSitemap: ${BASE}/sitemap.xml\n`);
   if (p === '/sitemap.xml' && !u.searchParams.get('page')) return send(200, 'application/xml', `<?xml version="1.0"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>${BASE}/sitemap.xml?page=1</loc></sitemap><sitemap><loc>${BASE}/sitemap.xml?page=2</loc></sitemap></sitemapindex>`);
   if (p === '/sitemap.xml') {
     const page = Number(u.searchParams.get('page')); const half = Math.ceil(sitemapUrls.length / 2);

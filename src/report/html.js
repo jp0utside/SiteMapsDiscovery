@@ -9,8 +9,8 @@ export function renderHtml({ cfg, apps, occ, coverage, arcgis, keys, totals, run
   const content = apps.filter(a => a.placement_summary !== 'site-wide navigation');
   const appCols = [
     { h: 'Application', f: a => `<code>${esc(a.identity_key)}</code>${a.title ? `<br><span class="muted">${esc(a.title)}</span>` : ''}` },
-    { h: 'Vendor', k: 'vendor' }, { h: 'Type', f: a => `${esc(a.type)}${a.flagged ? ' <span class="flag">flagged</span>' : ''}` },
-    { h: 'Pages', f: a => `${a.occurrence_count} <span class="muted">(${a.main_content_pages} content / ${a.site_chrome_pages} nav)</span>` },
+    { h: 'Kind', f: a => `${esc(a.app_kind)}<br><span class="muted">${esc(a.hosting)}</span>` }, { h: 'Type', f: a => `${esc(a.type)}${a.flagged ? ' <span class="flag">flagged</span>' : ''}` },
+    { h: 'Pages', f: a => `${a.occurrence_count} <span class="muted">(${a.embed_pages} embedded / ${a.main_content_pages - a.embed_pages} linked / ${a.site_chrome_pages} nav)</span>` },
     { h: 'County org', k: 'in_county_org_label' },
     { h: 'Example page', f: a => link(a.example_url, shorten(a.example_url)) },
     { h: 'Target', f: a => link(a.target_url, shorten(a.target_url, 70)) },
@@ -44,7 +44,9 @@ code{font-size:12px;background:#f3f3f3;padding:1px 4px;border-radius:3px;word-br
 <div class="card"><b>${arcgis.external.length}</b>ArcGIS apps outside the county org</div>
 <div class="card"><b>${coverage.discovered}</b>URLs discovered</div>
 </div>
+<p class="muted">Detection scope: ${cfg.detection && cfg.detection.vendors && cfg.detection.vendors.length ? `vendors <b>${esc(cfg.detection.vendors.join(', '))}</b> only (config.yaml → detection.vendors)` : 'all vendors in rules.yaml'}. Links to map applications are ${cfg.detection && cfg.detection.record_links === false ? 'not recorded' : 'recorded and flagged'}.</p>
 <h3>By vendor</h3>${table(totals.by_vendor, [{ h: 'Vendor', k: 'vendor' }, { h: 'Applications', k: 'c' }])}
+<h3>By application kind</h3>${table(Object.entries(apps.reduce((m, a) => (m[a.app_kind] = (m[a.app_kind] || 0) + 1, m), {})).sort((x, y) => y[1] - x[1]).map(([k, c]) => ({ k, c })), [{ h: 'Kind', k: 'k' }, { h: 'Applications', k: 'c' }])}
 <h3>By type</h3>${table(totals.by_type, [{ h: 'Type', k: 'type' }, { h: 'Applications', k: 'c' }])}
 <p class="muted">Types <code>map_link_only</code> and <code>non_geographic</code> are recorded and flagged; filter <code>applications.csv</code> on the <code>flagged</code> column.</p>
 
@@ -53,7 +55,10 @@ code{font-size:12px;background:#f3f3f3;padding:1px 4px;border-radius:3px;word-br
 <div class="${arcgis.external.length ? 'crit' : 'ok'}">${arcgis.external.length ? 'These applications are served from ArcGIS accounts outside the county organization (vendor-hosted, personal accounts, shadow IT). Ownership, billing and continuity are not under county control.' : 'No ArcGIS application embedded on a crawled page was found outside the county org.'}</div>
 ${table(arcgis.external, appCols)}
 ${arcgis.unknown.length ? `<h3>Unknown ownership — item not publicly readable (${arcgis.unknown.length})</h3><p class="muted">The item endpoint returned an error (private, deleted, or the <code>arcgis</code> command has not run). Verify manually.</p>${table(arcgis.unknown, appCols)}` : ''}
-<h3>Embedded — county org items found on crawled pages (${arcgis.embedded.length})</h3>${table(arcgis.embedded, appCols)}
+<h3>Embedded — county org items embedded on crawled pages (${arcgis.embedded.length})</h3>${table(arcgis.embedded, appCols)}
+<h3>Linked only — county org items that pages link to but never embed (${arcgis.linked_only_org.length})</h3><p class="muted">Recorded as <code>map_link_only</code> and flagged. Not orphaned: the site sends visitors to them.</p>${table(arcgis.linked_only_org, appCols)}
+${arcgis.enterprise.length ? `<h3>ArcGIS Enterprise / Geocortex viewers on county hosts (${arcgis.enterprise.length})</h3><p class="muted">Esri-platform applications served from county infrastructure (e.g. <code>gis.smcgov.org</code>). They have no ArcGIS Online item id, so they cannot be joined to the org list.</p>${table(arcgis.enterprise, appCols)}` : ''}
+${arcgis.esri_inpage.length ? `<h3>Esri maps built in page code, no item id (${arcgis.esri_inpage.length})</h3><p class="muted">ArcGIS JS API maps whose web map id was not observed. Inherently per-page identities.</p>${table(arcgis.esri_inpage, appCols)}` : ''}
 <h3>Orphaned — county org items on no crawled page (${arcgis.orphaned.length})</h3><p class="muted">Publicly shared in the org but never referenced from ${esc(crawlHosts)}. They may be used on other county hosts (not crawled) or be genuinely unused.</p>${table(arcgis.orphaned, itemCols)}
 ${arcgis.non_arcgis_external.length ? `<h3>Other externally hosted maps (${arcgis.non_arcgis_external.length})</h3><p class="muted">Non-ArcGIS applications hosted outside <code>*.smcgov.org</code> (Google, Mapbox, third-party viewers, …).</p>${table(arcgis.non_arcgis_external, appCols)}` : ''}
 

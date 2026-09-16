@@ -120,7 +120,7 @@ export function composeFindings(pageUrl, dom, requests, frames, rules, priorStro
   for (const fr of dom.iframes || []) {
     iframeUrls.add(fr.src);
     const rule = fr.matched || (rules.matchRequestUrl(fr.src) || {}).rule; if (!rule) continue;
-    const id = resolveIdentity(fr.src, rules); if (!id) continue;
+    const id = resolveIdentity(fr.src, rules, rule); if (!id) continue;
     const f = finding({ pageUrl, id, rule, type: rule.type, signal_type: 'iframe', signal_value: fr.src, target: fr.src, placement: fr.placement, container: fr.container, width: fr.bbox.w, height: fr.bbox.h, title: fr.title, nonGeo: fr.nonGeo });
     f.bbox = fr.bbox; push(f);
   }
@@ -128,13 +128,13 @@ export function composeFindings(pageUrl, dom, requests, frames, rules, priorStro
   for (const fr of frames || []) {
     if (iframeUrls.has(fr.url)) continue;
     const rule = rules.matchEmbedUrl(fr.url) || (rules.matchRequestUrl(fr.url) || {}).rule; if (!rule) continue;
-    const id = resolveIdentity(fr.url, rules); if (!id) continue;
+    const id = resolveIdentity(fr.url, rules, rule); if (!id) continue;
     const nested = fr.parent !== 'main';
     push(finding({ pageUrl, id, rule, type: rule.type, signal_type: 'frame', signal_value: fr.url, target: fr.url, placement: 'main_content', container: nested ? `frame(${fr.parent.slice(0, 120)})` : null, confidence: nested ? 'low' : rule.confidence }));
   }
   // Links
   for (const l of dom.links || []) {
-    const id = resolveIdentity(l.href, rules); if (!id) continue;
+    const id = resolveIdentity(l.href, rules, l.matched); if (!id) continue;
     push(finding({ pageUrl, id, rule: l.matched, type: 'map_link_only', signal_type: 'link', signal_value: l.href, target: l.href, placement: l.placement, container: l.container, title: l.text }));
   }
   // Static images

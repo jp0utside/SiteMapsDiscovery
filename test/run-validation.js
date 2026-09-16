@@ -31,12 +31,14 @@ try {
   const GT = {
     '/tsd/san-mateo-county-digital-equity-portal': [['arcgis:item:e04627c3dc7a4c38a6ebb9f0d5b8dff1', 'gis_application']],
     '/privacy-policy': [],
-    '/planning/gis-map-zoning-and-other-info-0': [['arcgis:item:aaaa1111bbbb2222cccc3333dddd4444', 'map_link_only'], ['iframe:maps.googleapis.com/maps/api/staticmap?center=37.5,-122.3', 'static_map_image']],
+    '/planning/gis-map-zoning-and-other-info-0': [['arcgis:item:aaaa1111bbbb2222cccc3333dddd4444', 'map_link_only'], ['iframe:maps.googleapis.com/maps/api/staticmap/?center=37.5,-122.3', 'static_map_image'], ['link:google.com/maps', 'map_link_only']],
     '/tsd/gis': [[`inpage:leaflet:${u('/tsd/gis')}:div#county-map`, 'interactive_webmap']],
-    '/hsa/find-services': [['gmymaps:mid:1XyZ_abc123', 'interactive_webmap']],
+    '/hsa/find-services': [['gmymaps:mid:1XyZ_abc123', 'interactive_webmap'], ['link:google.com/maps', 'map_link_only']],
+    '/hsa/contact': [['arcgis:item:aaaa1111bbbb2222cccc3333dddd4444', 'map_link_only']],
+    '/dpw/viewers': [['iframe:gis.smcgov.org/apps/publicviewer/', 'map_link_only']],
     '/parks/seating': [[`inpage:leaflet:${u('/parks/seating')}:div#seatmap`, 'non_geographic']],
     '/about/shadow-map': [['arcgis:item:ffff0000eeee1111dddd2222cccc3333', 'gis_application']],
-    '/tsd/tableau': [['iframe:public.tableau.com/views/SMCDashboard/Map', 'embedded_third_party'], ['arcgis:item:1234123412341234123412341234abcd', 'map_link_only']],
+    '/tsd/tableau': [['iframe:public.tableau.com/views/SMCDashboard/Map/', 'embedded_third_party'], ['arcgis:item:1234123412341234123412341234abcd', 'map_link_only']],
     '/tsd/mapbox-page': [['mapbox:style:smcgis/ckabc123def', 'interactive_webmap']],
     '/news/article-3': [], '/': [],
   };
@@ -111,6 +113,11 @@ try {
   check('screenshots: none for link-only or site-chrome apps', !shots.some(s => /c7075a28|Html5Viewer|aaaa1111/.test(s.identity_key)));
   const key = one(`SELECT api_key FROM findings WHERE api_key IS NOT NULL LIMIT 1`);
   check('API key extracted from static map URL', key?.api_key === 'AIzaFAKEKEY123', key?.api_key);
+  check('attribution links inside map controls ignored (no OpenStreetMap / Leaflet link findings)', one(`SELECT COUNT(*) c FROM findings WHERE target_url LIKE '%openstreetmap.org%' OR target_url LIKE '%leafletjs.com%'`).c === 0, q(`SELECT target_url FROM findings WHERE target_url LIKE '%openstreetmap.org%' OR target_url LIKE '%leafletjs.com%'`).map(r => r.target_url).join(','));
+  check('trailing-slash variants resolve to one application', one(`SELECT COUNT(*) c FROM applications WHERE identity_key LIKE 'iframe:gis.smcgov.org/apps/publicviewer%'`).c === 1 && one(`SELECT occurrence_count FROM applications WHERE identity_key='iframe:gis.smcgov.org/apps/publicviewer/'`)?.occurrence_count === 1);
+  const gm = one(`SELECT occurrence_count, type FROM applications WHERE identity_key='link:google.com/maps'`);
+  check('Google directions/place links collapse to one flagged application', gm?.occurrence_count === 2 && gm?.type === 'map_link_only', JSON.stringify(gm));
+  check('link-only pages scheduled for tier 2 when links_trigger_render is on', st('/hsa/contact')?.tier2_reason === 'hit', JSON.stringify(st('/hsa/contact')));
 
   // ArcGIS cross-reference (mock org)
   const inOrg = (id) => one(`SELECT in_county_org FROM applications WHERE arcgis_item_id=?`, id)?.in_county_org;
@@ -139,14 +146,19 @@ try {
   // ---- Phase B: Ctrl-C resume
   console.log('\n=== Phase B: Ctrl-C mid-scan, then resume ===');
   fs.rmSync('test/out/test.sqlite', { force: true }); fs.rmSync('test/out/test.sqlite-wal', { force: true }); fs.rmSync('test/out/test.sqlite-shm', { force: true }); fs.rmSync('test/out/screenshots', { recursive: true, force: true });
-  run(['inventory', '--no-crawl']);                       // sitemap only, nothing tier-1 yet → scan does all the work
+  const inv = run(['inventory', '--no-crawl']);                       // sitemap only, nothing tier-1 yet → scan does all the work
+  check('robots.txt Crawl-delay parsed and override announced loudly', /Crawl-delay: 5s is being OVERRIDDEN/.test(inv.stdout + inv.stderr));
+  const lim = run(['scan', '--limit', '7', '--concurrency', '3']);
+  const limDone = one2(`SELECT COUNT(*) c FROM urls WHERE status='done' OR (status='skipped' AND skip_reason<>'robots_disallow')`);
+  check('--limit is exact under concurrency', limDone === 7, `processed=${limDone}`);
+  check('scan announces detection scope', /detection: vendors ALL; links recorded/.test(lim.stdout));
   const total = one2(`SELECT COUNT(*) c FROM urls WHERE status='pending'`);
   const child = spawn('node', ['bin/cli.js', ...CFG, 'scan', '--concurrency', '2'], { stdio: ['ignore', 'pipe', 'pipe'] });
   let out = ''; child.stdout.on('data', d => out += d); child.stderr.on('data', d => out += d);
   await sleep(3500); child.kill('SIGINT');
   const code = await new Promise(r => child.on('exit', r));
   const afterKill = { done: one2(`SELECT COUNT(*) c FROM urls WHERE status='done'`), inprog: one2(`SELECT COUNT(*) c FROM urls WHERE status='in_progress'`), pending: one2(`SELECT COUNT(*) c FROM urls WHERE status='pending'`), skipped: one2(`SELECT COUNT(*) c FROM urls WHERE status='skipped'`) };
-  check(`Ctrl-C: scan exited (code ${code}) with partial progress`, afterKill.done > 0 && afterKill.done + afterKill.skipped < total, JSON.stringify(afterKill));
+  check(`Ctrl-C: scan exited (code ${code}) with partial progress`, afterKill.done > 7 && afterKill.done + afterKill.skipped < total + 7, JSON.stringify(afterKill));
   check('Ctrl-C: no rows left in_progress after graceful stop', afterKill.inprog === 0, `in_progress=${afterKill.inprog}`);
   const findingsAfterKill = one2(`SELECT COUNT(*) c FROM findings`);
   run(['scan']);
@@ -159,6 +171,33 @@ try {
   const appsB = dbB.prepare(`SELECT COUNT(*) c FROM applications`).get().c;
   dbB.close();
   check('resume: ground-truth findings intact after restart', eqB >= 1 && appsB >= 10, `equity rows=${eqB} apps=${appsB}`);
+
+  // ---- Phase C: Esri-only detection scope (production config values) on the same fixture
+  console.log('\n=== Phase C: detection.vendors = [esri, esri-enterprise], links do not trigger render ===');
+  const esriCfg = fs.readFileSync('test/config.test.yaml', 'utf8')
+    .replace('detection: { vendors: [], record_links: true, links_trigger_render: true }', 'detection: { vendors: [esri, esri-enterprise], record_links: true, links_trigger_render: false }')
+    .replace('database: ./test/out/test.sqlite', 'database: ./test/out/esri.sqlite').replace('dir: ./test/out/screenshots', 'dir: ./test/out/screenshots-esri').replace('dir: ./test/out,', 'dir: ./test/out/esri,');
+  fs.writeFileSync('test/out/config-esri.yaml', esriCfg);
+  const runE = (args) => spawnSync('node', ['bin/cli.js', '-c', 'test/out/config-esri.yaml', ...args], { encoding: 'utf8' });
+  runE(['inventory']); const scanE = runE(['scan']); runE(['arcgis']); runE(['report']);
+  const dbE = new Database('test/out/esri.sqlite', { readonly: true });
+  const qe = (sql, ...p) => dbE.prepare(sql).all(...p); const oe = (sql, ...p) => dbE.prepare(sql).get(...p);
+  check('esri-only: scan announces the vendor scope', /detection: vendors esri,esri-enterprise; links recorded \(flagged\); links trigger render: false/.test(scanE.stdout));
+  const vendors = qe(`SELECT DISTINCT vendor FROM findings`).map(r => r.vendor).sort();
+  check('esri-only: no findings from other vendors', vendors.every(v => ['esri', 'esri-enterprise'].includes(v)), vendors.join(','));
+  check('esri-only: equity portal iframe still found at tier 1', !!oe(`SELECT 1 FROM findings WHERE identity_key='arcgis:item:e04627c3dc7a4c38a6ebb9f0d5b8dff1' AND tier=1 AND placement='main_content'`));
+  check('esri-only: shadow-DOM dashboard still found at tier 2', !!oe(`SELECT 1 FROM findings WHERE identity_key='arcgis:item:ffff0000eeee1111dddd2222cccc3333' AND signal_type='iframe' AND tier=2`));
+  check('esri-only: Enterprise viewers recorded under vendor esri-enterprise', oe(`SELECT vendor FROM applications WHERE identity_key='iframe:gis.smcgov.org/Html5Viewer/'`)?.vendor === 'esri-enterprise' && oe(`SELECT vendor FROM applications WHERE identity_key='iframe:gis.smcgov.org/apps/publicviewer/'`)?.vendor === 'esri-enterprise');
+  check('esri-only: Esri links still recorded and flagged', oe(`SELECT type, flagged FROM findings WHERE url=? AND identity_key='arcgis:item:aaaa1111bbbb2222cccc3333dddd4444'`, u('/hsa/contact'))?.flagged === 1);
+  check('esri-only: a link-only page is NOT a tier-1 hit (not rendered for that reason)', ['sample', 'none'].includes(oe(`SELECT tier2_reason FROM urls WHERE url=?`, u('/hsa/contact'))?.tier2_reason), oe(`SELECT tier2_reason FROM urls WHERE url=?`, u('/hsa/contact'))?.tier2_reason);
+  check('esri-only: Google / Leaflet / Tableau / Mapbox pages produce no applications', oe(`SELECT COUNT(*) c FROM applications WHERE identity_key LIKE '%google%' OR identity_key LIKE 'inpage:leaflet%' OR identity_key LIKE '%tableau%' OR identity_key LIKE 'mapbox:%'`).c === 0);
+  const rendered = oe(`SELECT COUNT(*) c FROM urls WHERE tier2_done=1`).c, renderedA = one2(`SELECT COUNT(*) c FROM urls WHERE tier2_done=1`);
+  check(`esri-only: fewer pages rendered than the all-vendor run (${rendered} vs ${renderedA})`, rendered < renderedA);
+  const appsE = fs.readFileSync('test/out/esri/applications.csv', 'utf8');
+  check('esri-only: applications.csv carries app_kind / hosting / linked_only columns', /^identity_key,vendor,app_kind,hosting,/.test(appsE) && /ArcGIS Web AppBuilder,ArcGIS Online/.test(appsE));
+  const htmlE = fs.readFileSync('test/out/esri/report.html', 'utf8');
+  check('esri-only: report has Linked-only and Enterprise sections and states the scope', /Linked only/.test(htmlE) && /ArcGIS Enterprise \/ Geocortex viewers/.test(htmlE) && /vendors <b>esri, esri-enterprise<\/b> only/.test(htmlE));
+  dbE.close();
 } finally { server.kill(); }
 
 console.log(`\n${results.length - failures}/${results.length} checks passed${failures ? `, ${failures} FAILED` : ''}`);

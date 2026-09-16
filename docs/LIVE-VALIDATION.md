@@ -29,6 +29,15 @@ Run the fixture harness once to prove the environment works: `npm test` → expe
 Use a dedicated database for everything below so nothing pollutes a later production run:
 `export DB=validation.sqlite` and pass `-d $DB` to every command.
 
+Two config settings shape the run; check them before starting:
+
+- `detection.vendors` is `[esri, esri-enterprise]` — only Esri findings are recorded. Google
+  "Get Directions" links and other vendors produce nothing.
+- `http.respect_crawl_delay` defaults to `true`, and www.smcgov.org declares `Crawl-delay: 10`,
+  so every page fetch and navigation on the host is spaced 10 s apart. Step 5's 100-page sample
+  then takes about 20–25 minutes. The startup log announces `HONOURED` or `OVERRIDDEN`; do not
+  set it to `false` unless the site owner has approved the faster rate.
+
 ## 1. Ground-truth pages (the core §14 check)
 
 ```bash
@@ -46,10 +55,10 @@ Then inspect the database. `sqlite3` may not be installed; this works anywhere:
 ```bash
 node -e '
 const db = require("better-sqlite3")(process.env.DB, { readonly: true });
-console.log("\n== urls"); console.table(db.prepare("SELECT url, status, http_status, tier1_done, tier2_done, tier2_reason, tier1_hit, tier2_hit, chrome_keys, error FROM urls").all());
-console.log("\n== main-content findings"); console.table(db.prepare("SELECT url, identity_key, type, placement, signal_type, confidence, tier, container_selector FROM findings WHERE placement=\"main_content\" ORDER BY url").all());
-console.log("\n== site-chrome exemplar findings"); console.table(db.prepare("SELECT identity_key, signal_type, container_selector, substr(signal_value,1,80) signal_value FROM findings WHERE placement=\"site_chrome\"").all());
-console.log("\n== applications"); console.table(db.prepare("SELECT identity_key, vendor, type, title, occurrence_count, screenshot_path FROM applications").all());
+console.log("\n== urls"); console.table(db.prepare(`SELECT url, status, http_status, tier1_done, tier2_done, tier2_reason, tier1_hit, tier2_hit, chrome_keys, error FROM urls`).all());
+console.log("\n== main-content findings"); console.table(db.prepare(`SELECT url, identity_key, type, placement, signal_type, confidence, tier, container_selector FROM findings WHERE placement='main_content' ORDER BY url`).all());
+console.log("\n== site-chrome exemplar findings"); console.table(db.prepare(`SELECT identity_key, signal_type, container_selector, substr(signal_value,1,80) signal_value FROM findings WHERE placement='site_chrome'`).all());
+console.log("\n== applications"); console.table(db.prepare(`SELECT identity_key, vendor, type, title, occurrence_count, screenshot_path FROM applications`).all());
 '
 ```
 
@@ -107,9 +116,9 @@ verdict differs, keep `output/preflight.json` and report which hosts/signals tri
 node bin/cli.js -d $DB inventory --no-crawl
 node -e '
 const db = require("better-sqlite3")(process.env.DB, { readonly: true });
-console.table(db.prepare("SELECT source, status, COUNT(*) n FROM urls GROUP BY 1,2").all());
-console.log(db.prepare("SELECT url FROM urls WHERE source=\"sitemap\" ORDER BY random() LIMIT 10").all());
-console.log(db.prepare("SELECT value FROM meta WHERE key=\"robots_txt\"").get());
+console.table(db.prepare(`SELECT source, status, COUNT(*) n FROM urls GROUP BY 1,2`).all());
+console.log(db.prepare(`SELECT url FROM urls WHERE source='sitemap' ORDER BY random() LIMIT 10`).all());
+console.log(db.prepare(`SELECT value FROM meta WHERE key='robots_txt'`).get());
 '
 ```
 
@@ -126,9 +135,9 @@ Run this on the same database (it joins against the applications found in Step 1
 node bin/cli.js -d $DB arcgis
 node -e '
 const db = require("better-sqlite3")(process.env.DB, { readonly: true });
-console.log(db.prepare("SELECT value FROM meta WHERE key=\"arcgis_org\"").get());
-console.table(db.prepare("SELECT type, COUNT(*) n FROM arcgis_items WHERE in_org=1 GROUP BY type").all());
-console.table(db.prepare("SELECT identity_key, arcgis_item_id, in_county_org, title FROM applications WHERE arcgis_item_id IS NOT NULL").all());
+console.log(db.prepare(`SELECT value FROM meta WHERE key='arcgis_org'`).get());
+console.table(db.prepare(`SELECT type, COUNT(*) n FROM arcgis_items WHERE in_org=1 GROUP BY type`).all());
+console.table(db.prepare(`SELECT identity_key, arcgis_item_id, in_county_org, title FROM applications WHERE arcgis_item_id IS NOT NULL`).all());
 '
 ```
 
@@ -146,14 +155,15 @@ With the sitemap-populated database from Step 3:
 time node bin/cli.js -d $DB scan --limit 100 --concurrency 3
 node -e '
 const db = require("better-sqlite3")(process.env.DB, { readonly: true });
-console.table(db.prepare("SELECT http_status, COUNT(*) n FROM urls WHERE tier1_done=1 GROUP BY 1").all());
-console.table(db.prepare("SELECT tier2_reason, SUM(tier2_done) rendered, COUNT(*) n FROM urls WHERE tier1_done=1 GROUP BY 1").all());
-console.log(db.prepare("SELECT summary_json FROM runs WHERE command=\"scan\" ORDER BY id DESC LIMIT 1").get());
+console.table(db.prepare(`SELECT http_status, COUNT(*) n FROM urls WHERE tier1_done=1 GROUP BY 1`).all());
+console.table(db.prepare(`SELECT tier2_reason, SUM(tier2_done) rendered, COUNT(*) n FROM urls WHERE tier1_done=1 GROUP BY 1`).all());
+console.log(db.prepare(`SELECT summary_json FROM runs WHERE command='scan' ORDER BY id DESC LIMIT 1`).get());
 '
 ```
 
 Record: elapsed time, pages/minute, how many of the 100 went to tier 2 and why, and the
-`http_status` distribution. **Any 403 or 429 responses mean a WAF or rate limiter is reacting;
+`http_status` distribution. With Esri-only detection and links not triggering renders, expect
+`hit` to be a small share (embedded Esri apps only) and most renders to come from `sample`. **Any 403 or 429 responses mean a WAF or rate limiter is reacting;
 stop and report immediately** rather than continuing. Also report the share of URLs with
 `tier2_reason = pattern` (the map-adjacent word list is broad and this number drives run time).
 
@@ -162,12 +172,12 @@ stop and report immediately** rather than continuing. Also report the share of U
 ```bash
 node bin/cli.js -d $DB scan --limit 60 --concurrency 2 &
 sleep 25; kill -INT %1; wait
-node -e 'const db=require("better-sqlite3")(process.env.DB,{readonly:true}); console.table(db.prepare("SELECT status, COUNT(*) n FROM urls GROUP BY 1").all())'
+node -e 'const db=require("better-sqlite3")(process.env.DB,{readonly:true}); console.table(db.prepare(`SELECT status, COUNT(*) n FROM urls GROUP BY 1`).all())'
 node bin/cli.js -d $DB scan --limit 60 --concurrency 2
 node -e '
 const db = require("better-sqlite3")(process.env.DB, { readonly: true });
-console.log("in_progress:", db.prepare("SELECT COUNT(*) c FROM urls WHERE status=\"in_progress\"").get().c);
-console.log("duplicate finding groups:", db.prepare("SELECT COUNT(*) c FROM (SELECT url, identity_key, signal_type, placement, signal_value, tier, COUNT(*) n FROM findings GROUP BY 1,2,3,4,5,6 HAVING n>1)").get().c);
+console.log("in_progress:", db.prepare(`SELECT COUNT(*) c FROM urls WHERE status='in_progress'`).get().c);
+console.log("duplicate finding groups:", db.prepare(`SELECT COUNT(*) c FROM (SELECT url, identity_key, signal_type, placement, signal_value, tier, COUNT(*) n FROM findings GROUP BY 1,2,3,4,5,6 HAVING n>1)`).get().c);
 '
 ```
 

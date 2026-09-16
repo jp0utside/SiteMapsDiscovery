@@ -7,6 +7,9 @@ import { collectSitemapUrls } from '../lib/sitemap.js';
 import { detectStatic } from '../lib/tier1.js';
 import { Store, inSample } from '../lib/store.js';
 import { log, fmtDuration } from '../lib/log.js';
+import { applyDetectionPolicy, isHit } from '../lib/detection.js';
+import { applyCrawlDelay } from '../lib/robots.js';
+import { hostOf } from '../lib/url.js';
 
 /**
  * Phase 1 — populate the urls table: sitemaps → robots.txt → BFS same-host link crawl.
@@ -36,6 +39,7 @@ export async function inventory(opts) {
     } catch (e) { log.warn(`robots.txt fetch failed: ${e.message}; treating as allow-all`); }
   }
   const allowed = (url) => { try { const u = new URL(url); return robots.isAllowed(u.pathname + u.search); } catch { return true; } };
+  applyCrawlDelay(robots, hostOf(cfg.seeds.homepage), [http.limiter], cfg, log);
 
   /** Insert one candidate; returns true if newly added to the crawl queue. */
   const add = (raw, base, source) => {
@@ -89,13 +93,14 @@ export async function inventory(opts) {
       if (!scope.isCrawlableHost(new URL(res.finalUrl).host)) { markSkip.run('redirected_off_host', url); markLinks.run(url); stats.out_of_scope++; return; }
       if (finalNorm !== url && db.prepare('SELECT 1 FROM urls WHERE url=?').get(finalNorm)) { markSkip.run('redirect_duplicate', url); markLinks.run(url); add(finalNorm, undefined, 'crawl'); return; }
       const det = detectStatic(res.text, url, cfg.rules);
+      det.findings = applyDetectionPolicy(det.findings, cfg);
       db.prepare('UPDATE urls SET title=? WHERE url=?').run(det.title || null, url);
       const tx = db.transaction(() => {
         for (const l of det.links) add(l, res.finalUrl, 'crawl');
         if (finalNorm !== url) add(finalNorm, undefined, 'crawl');
         markLinks.run(url);
         if (runTier1) {
-          const hit = det.findings.some(f => f.placement === 'main_content') ? 1 : 0;
+          const hit = isHit(det.findings, cfg) ? 1 : 0;
           const adjacent = cfg.rules.isMapAdjacent(new URL(url).pathname) || cfg.rules.isMapAdjacent(det.title);
           const reason = hit ? 'hit' : adjacent ? 'pattern' : inSample(url, cfg.scan.tier2_sample_rate) ? 'sample' : 'none';
           store.store(url, 1, det.findings, null);

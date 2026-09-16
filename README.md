@@ -15,7 +15,7 @@ The same application embedded on 60 pages is **one** application row and **60** 
 
 ## Requirements
 
-- Node.js 20+ (tested on 22)
+- Node.js 20+ (tested on 22; the CLI refuses to start on older versions)
 - Chromium via Playwright (`npx playwright install chromium` on first setup)
 - A laptop that can run unattended for hours. Runs are resumable (see below).
 
@@ -97,7 +97,8 @@ report they collapse to a single "site-wide navigation" application row with an 
 | 1 | ArcGIS item id (`id=`, `appid=`, `webmap=`, or the id in an Experience/Dashboard/StoryMap path) | `arcgis:item:<id>` |
 | 2 | Google My Maps `mid=` | `gmymaps:mid:<id>` |
 | 3 | Mapbox style (`mapbox://styles/<org>/<id>` or the https style URL) | `mapbox:style:<org>/<id>` |
-| 4 | Iframe/link origin + path, query dropped except identifying params (`rules.yaml` → `identity.identifying_params`) | `iframe:gis.smcgov.org/Html5Viewer/` |
+| 4 | Origin + path (trailing slash normalised), query dropped except identifying params (`rules.yaml` → `identity.identifying_params`). The `iframe:` prefix names this rule and is used whether the target was embedded or only linked | `iframe:gis.smcgov.org/Html5Viewer/` |
+| 4b | A rule may pin a fixed key (`identity_key:` on an `embeds` rule), e.g. every Google "Get Directions" link → one application | `link:google.com/maps` |
 | 5 | In-page map with no external identity (inherently per page; `applications.per_page = 1`) | `inpage:<vendor>:<page_url>:<container>` |
 
 One in-page map gets **one** identity even when several selectors, globals and tile requests
@@ -115,7 +116,26 @@ filtered, never dropped.
 clipped to the map container, JPEG q70, written to `./screenshots/<hash>.jpg`; only the path is
 stored. Hard cap 1,000 images (scan continues; a warning is logged).
 
-## Scope
+## Detection scope (what counts as a finding)
+
+`rules.yaml` carries rules for every vendor; `config.yaml` → `detection` narrows which are live:
+
+```yaml
+detection:
+  vendors: [esri, esri-enterprise]  # allowlist of rule vendors; [] = all vendors
+  record_links: true                # keep <a href> links to map apps as flagged map_link_only findings
+  links_trigger_render: false       # a page whose only signal is a link is not a tier-1 hit
+```
+
+The audit's subject is ESRI / ArcGIS Online items embedded in county pages, so the shipped config
+allows `esri` (ArcGIS Online apps, StoryMaps, the JS API) and `esri-enterprise` (ArcGIS Enterprise
+and Geocortex viewers on county hosts such as `gis.smcgov.org`). Google, Mapbox, Leaflet, Tableau
+and the rest stay in `rules.yaml` but produce nothing until added to the allowlist. Links to Esri
+apps are still recorded and flagged (so an org item that pages link to is not mis-reported as
+orphaned) but do not by themselves cause a page to be rendered. Links inside map attribution
+controls ("© OpenStreetMap", "Powered by Esri") are always ignored.
+
+## Crawl scope
 
 Scope is data, not code — `config.yaml` → `scope`:
 
@@ -136,14 +156,21 @@ URL normalization before queueing: lowercase host, strip fragment, strip trailin
 assets by extension, dedupe. `robots.txt` `Disallow` rules are respected (disallowed URLs are
 recorded as `skipped/robots_disallow`, never fetched). Hard cap 50,000 URLs, logged loudly.
 
+**Crawl-delay.** www.smcgov.org's robots.txt declares `Crawl-delay: 10`. With
+`http.respect_crawl_delay: true` (the default) the tool spaces page fetches and page navigations
+on that host by the declared delay, which makes a full run take roughly 40 hours; a rendered
+page's own CSS/JS/image loads are treated as part of that page. Setting it to `false` runs at
+`http.requests_per_second_per_host` instead (about 4–5 hours) and must have the site owner's
+explicit approval. Either way the choice is announced loudly at startup.
+
 ## Outputs (`output/`)
 
 | File | Grain |
 |---|---|
-| `applications.csv` | one row per unique application: identity, vendor, type, title, occurrence count, content vs nav page counts, in-county-org flag, screenshot path, example URL |
+| `applications.csv` | one row per unique application: identity, vendor, app kind (Web AppBuilder, Experience Builder, Dashboard, …), hosting (ArcGIS Online / ArcGIS Enterprise), type, title, occurrence count, embedded vs linked vs nav page counts, `linked_only`, in-county-org flag, screenshot path, example URL |
 | `occurrences.csv` | one row per (page, application) pair in page content, with placement and how it appears (`--include-chrome-occurrences` to also enumerate nav/footer presence per page) |
 | `findings.jsonl` | every raw finding with all matched signals |
-| `report.html` | totals by vendor/type, the three ArcGIS buckets (**External** first — apps on county pages not in the county org), unrestricted-key list, screenshot gallery, and a **coverage section** (discovered / crawled / rendered / failed / skipped / pending, cap reached, tier-2 sample hit rate) |
+| `report.html` | totals by vendor / kind / type, the ArcGIS buckets (**External** first — apps on county pages not in the county org; then embedded, linked-only, Enterprise-hosted, in-page JS API, orphaned), unrestricted-key list, screenshot gallery, and a **coverage section** (discovered / crawled / rendered / failed / skipped / pending, cap reached, tier-2 sample hit rate) |
 | `summary.json`, `preflight.json` | machine-readable summaries |
 
 ## Data model (SQLite, `inventory.sqlite`)

@@ -14,8 +14,10 @@ inventory:
   run_tier1_during_crawl: true
   skip_extensions: [pdf, jpg, jpeg, png, gif, svg, webp, zip, doc, docx, xls, xlsx, ppt, pptx, csv, mp4, mp3]
   strip_query_params: ["utm_*", fbclid, gclid, mc_cid, mc_eid]
+detection: { vendors: [], record_links: true, links_trigger_render: true }
 http:
   user_agent: "SMC-Map-Inventory/1.0 (validation run)"
+  respect_crawl_delay: false
   requests_per_second_per_host: 50
   timeout_ms: 15000
   max_retries: 3

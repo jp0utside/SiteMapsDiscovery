@@ -9,8 +9,12 @@ const HEX32 = /\b[0-9a-f]{32}\b/i;
  * Resolution order (spec §8): ArcGIS item id → Google My Maps mid → Mapbox style → iframe origin+path.
  * Returns { key, arcgisItemId, arcgisOrg, apiKey, params } or null when the URL is not parseable.
  */
-export function resolveIdentity(targetUrl, rules) {
+export function resolveIdentity(targetUrl, rules, matchedRule = null) {
   if (!targetUrl) return null;
+  if (matchedRule && matchedRule.identity_key) { // rule-level fixed identity (e.g. collapse all Google directions links)
+    const base = resolveIdentity(targetUrl, rules) || {};
+    return { ...base, key: matchedRule.identity_key };
+  }
   const idParams = new Set((rules?.identity?.identifying_params) || ['id', 'appid', 'webmap', 'mid']);
   const credParams = (rules?.identity?.credential_params) || ['key', 'access_token', 'apikey'];
   // mapbox://styles/<org>/<id>
@@ -44,7 +48,11 @@ export function resolveIdentity(targetUrl, rules) {
   // 4. origin + path, query dropped except identifying params
   const kept = [];
   for (const [k, v] of q) if (idParams.has(k.toLowerCase())) kept.push(`${k}=${v.length > 64 ? 'h' + shortHash(v) : v}`);
-  out.key = `iframe:${host}${u.pathname}${kept.length ? '?' + kept.join('&') : ''}`;
+  // normalise the path so /apps/viewer and /apps/viewer/ are one application (extension-less last segment → trailing slash)
+  let p = u.pathname.replace(/\/{2,}/g, '/');
+  const last = p.slice(p.lastIndexOf('/') + 1);
+  if (last && !last.includes('.')) p += '/';
+  out.key = `iframe:${host}${p}${kept.length ? '?' + kept.join('&') : ''}`;
   return out;
 }
 
