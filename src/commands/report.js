@@ -30,14 +30,19 @@ export async function report(opts) {
       (SELECT group_concat(DISTINCT api_key) FROM findings f WHERE f.identity_key=a.identity_key AND api_key IS NOT NULL) AS api_keys,
       (SELECT group_concat(DISTINCT arcgis_org) FROM findings f WHERE f.identity_key=a.identity_key AND arcgis_org IS NOT NULL) AS arcgis_orgs
     FROM applications a ORDER BY a.occurrence_count DESC, a.identity_key`).all();
+  const kindStmt = db.prepare(`SELECT rule, signal_type FROM findings WHERE identity_key=? ORDER BY CASE signal_type WHEN 'iframe' THEN 0 WHEN 'frame' THEN 1 WHEN 'image' THEN 2 WHEN 'link' THEN 3 WHEN 'network' THEN 4 ELSE 5 END, id LIMIT 1`);
   for (const a of apps) {
+    const k = kindStmt.get(a.identity_key) || {};
+    a.app_kind = appKind(k.rule, k.signal_type, a);
+    a.hosting = a.arcgis_item_id ? 'ArcGIS Online' : a.vendor === 'esri-enterprise' ? 'ArcGIS Enterprise (county)' : a.vendor === 'esri' ? 'Esri (no item id)' : a.vendor;
+    a.linked_only = a.main_content_pages > 0 && a.embed_pages === 0 ? 1 : 0;
     a.placement_summary = a.main_content_pages === 0 && a.site_chrome_pages > 0 ? 'site-wide navigation' : a.site_chrome_pages > 0 ? 'content + navigation' : 'content';
     a.example_url = a.example_main_url || a.first_seen_url;
     a.flagged = (a.type === 'map_link_only' || a.type === 'non_geographic') ? 1 : 0;
     a.in_county_org_label = a.in_county_org === 1 ? 'yes' : a.in_county_org === 0 ? 'no' : (a.arcgis_item_id ? 'unknown' : 'n/a');
     if (a.screenshot_path) a.screenshot_rel = path.relative(outDir, path.resolve(a.screenshot_path)).split(path.sep).join('/');
   }
-  fs.writeFileSync(path.join(outDir, 'applications.csv'), csv(apps, ['identity_key', 'vendor', 'type', 'title', 'occurrence_count', 'main_content_pages', 'site_chrome_pages', 'placement_summary', 'in_county_org_label', 'arcgis_item_id', 'per_page', 'flagged', 'screenshot_path', 'example_url', 'target_url', 'signal_types', 'api_keys']));
+  fs.writeFileSync(path.join(outDir, 'applications.csv'), csv(apps, ['identity_key', 'vendor', 'app_kind', 'hosting', 'type', 'title', 'occurrence_count', 'main_content_pages', 'embed_pages', 'linked_only', 'site_chrome_pages', 'placement_summary', 'in_county_org_label', 'arcgis_item_id', 'per_page', 'flagged', 'screenshot_path', 'example_url', 'target_url', 'signal_types', 'api_keys']));
 
   // ---- Occurrences (one row per page × application). Site-chrome presence is not enumerated per page unless asked:
   // it is the same nav/header/footer on every crawled page and is summarised by site_chrome_pages in applications.csv.
@@ -94,9 +99,12 @@ export async function report(opts) {
   const org = JSON.parse(getMeta(db, 'arcgis_org') || 'null');
   const arcgis = {
     org,
-    embedded: apps.filter(a => a.arcgis_item_id && a.in_county_org === 1),
+    embedded: apps.filter(a => a.arcgis_item_id && a.in_county_org === 1 && !a.linked_only),
+    linked_only_org: apps.filter(a => a.arcgis_item_id && a.in_county_org === 1 && a.linked_only),
     external: apps.filter(a => a.arcgis_item_id && a.in_county_org === 0),
     unknown: apps.filter(a => a.arcgis_item_id && a.in_county_org == null),
+    enterprise: apps.filter(a => !a.arcgis_item_id && a.vendor === 'esri-enterprise'),
+    esri_inpage: apps.filter(a => !a.arcgis_item_id && a.vendor === 'esri'),
     orphaned: org ? db.prepare(`SELECT * FROM arcgis_items i WHERE i.in_org=1 AND i.org_id=? AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.arcgis_item_id=i.item_id) ORDER BY modified DESC`).all(org.id) : [],
     org_item_count: org ? cnt('SELECT COUNT(*) c FROM arcgis_items WHERE in_org=1 AND org_id=?', org.id) : 0,
     non_arcgis_external: apps.filter(a => !a.arcgis_item_id && !a.identity_key.startsWith('inpage:') && !/smcgov\.org/i.test(a.identity_key)),
@@ -128,6 +136,13 @@ export async function report(opts) {
   db.close();
 }
 
+function appKind(rule, signal, a) {
+  if (rule && rule.startsWith('embed:')) return rule.slice(6);
+  if (rule === 'host:js.arcgis.com' || (a.vendor === 'esri' && ['selector', 'global', 'network', 'static_html'].includes(signal))) return 'ArcGIS JS API map (in page)';
+  if (signal === 'image') return 'Static map image';
+  if (a.identity_key.startsWith('inpage:')) return `In-page map (${a.vendor})`;
+  return a.vendor || 'unknown';
+}
 const a_target = (apps, k) => (apps.find(a => a.identity_key === k) || {}).target_url || null;
 
 async function probeKey(http, k) {

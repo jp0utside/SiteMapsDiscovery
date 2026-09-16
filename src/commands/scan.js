@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadConfig, TOOL_VERSION } from '../lib/config.js';
-import { openDb, startRun, finishRun, now, getMeta } from '../lib/db.js';
+import { openDb, startRun, finishRun, now, getMeta, setMeta } from '../lib/db.js';
 import { Scope } from '../lib/url.js';
 import { HttpClient, isHtml } from '../lib/fetch.js';
 import { parseRobots } from '../lib/robots.js';
@@ -13,6 +13,8 @@ import { Store, inSample } from '../lib/store.js';
 import { HostRateLimiter } from '../lib/ratelimit.js';
 import { hostOf } from '../lib/url.js';
 import { log, fmtDuration } from '../lib/log.js';
+import { applyDetectionPolicy, isHit } from '../lib/detection.js';
+import { applyCrawlDelay } from '../lib/robots.js';
 
 /**
  * Phase 2 — scan: tier 1 (static fetch, every URL) + tier 2 (headless render of hits, map-adjacent URLs and a random sample).
@@ -41,7 +43,11 @@ export async function scan(opts) {
 
   // robots
   let robots = { isAllowed: () => true };
-  if (cfg.http.respect_robots !== false) { const txt = getMeta(db, 'robots_txt'); if (txt) robots = parseRobots(txt, 'smc-map-inventory'); }
+  if (cfg.http.respect_robots !== false) {
+    let txt = getMeta(db, 'robots_txt');
+    if (!txt && cfg.seeds.robots) { try { const r = await http.getText(cfg.seeds.robots, { accept: 'text/plain,*/*' }); if (r.status === 200) { txt = r.text; setMeta(db, 'robots_txt', txt); } } catch (e) { log.warn(`robots.txt fetch failed: ${e.message}`); } }
+    if (txt) robots = parseRobots(txt, 'smc-map-inventory');
+  }
   const allowed = (url) => { try { const u = new URL(url); return robots.isAllowed(u.pathname + u.search); } catch { return true; } };
 
   // Reset stale in_progress rows (crashed / killed run).
@@ -81,6 +87,8 @@ export async function scan(opts) {
   const shots = new ScreenshotPolicy(cfg, db);
   const navLimiter = new HostRateLimiter(cfg.http.requests_per_second_per_host || 2);
   const consentCookies = consent.enabled ? (rules.cmp.consent_cookies || []).map(c => ({ name: c.name, value: c.value, domain: hostOf(cfg.seeds.homepage), path: '/' })) : null;
+  applyCrawlDelay(robots, hostOf(cfg.seeds.homepage), [http.limiter, navLimiter], cfg, log);
+  log.info(`detection: vendors ${rules.vendorAllowlist.length ? rules.vendorAllowlist.join(',') : 'ALL'}; links ${cfg.detection.record_links === false ? 'dropped' : 'recorded (flagged)'}; links trigger render: ${cfg.detection.links_trigger_render !== false}`);
 
   const t0 = Date.now(); const deadline = cfg.scan.max_runtime_minutes ? t0 + cfg.scan.max_runtime_minutes * 60000 : Infinity;
   let completed = 0, hits = 0, rendered = 0, failed = 0, skipped = 0;
@@ -110,8 +118,9 @@ export async function scan(opts) {
       if (!scope.isCrawlableHost(new URL(res.finalUrl).host)) { upd.skip.run('redirected_off_host', url); skipped++; return 'skipped'; }
       if (finalNorm !== url && db.prepare('SELECT 1 FROM urls WHERE url=? AND url<>?').get(finalNorm, url)) { upd.skip.run('redirect_duplicate', url); skipped++; return 'skipped'; }
       const det = detectStatic(res.text, url, rules);
+      det.findings = applyDetectionPolicy(det.findings, cfg);
       title = det.title; db.prepare('UPDATE urls SET title=? WHERE url=?').run(title || null, url);
-      tier1Hit = det.findings.some(f => f.placement === 'main_content') ? 1 : 0;
+      tier1Hit = isHit(det.findings, cfg) ? 1 : 0;
       const adjacent = rules.isMapAdjacent(new URL(url).pathname) || rules.isMapAdjacent(title);
       reason = tier1Hit ? 'hit' : adjacent ? 'pattern' : inSample(url, cfg.scan.tier2_sample_rate) ? 'sample' : 'none';
       if (only) reason = reason === 'none' ? 'manual' : reason;
@@ -127,6 +136,7 @@ export async function scan(opts) {
       const ctx = await pool.context(workerId, { cookies: consentCookies });
       const r = await renderPage(ctx, url, { cfg, rules, consent, priorStrong: store.strongKeysForUrl(url), isNewIdentity: (k) => store.needsScreenshot(k), screenshot: (page, key, sel, bbox) => shots.shouldCapture(key, store.needsScreenshot(key)) ? shots.capture(page, key, sel, bbox) : null });
       if (r.error && !r.dom) throw new Error(`render: ${r.error}`);
+      r.findings = applyDetectionPolicy(r.findings, cfg);
       const t2hit = r.findings.some(f => f.placement !== 'site_chrome' && f.type !== 'map_link_only') ? 1 : 0;
       store.store(url, 2, r.findings, r.requests);
       if (r.title && !title) db.prepare('UPDATE urls SET title=COALESCE(title, ?) WHERE url=?').run(r.title, url);
@@ -141,9 +151,12 @@ export async function scan(opts) {
     return 'done';
   }
 
+  let claimed = 0;
   async function worker(workerId) {
-    while (!stopping && Date.now() < deadline && completed < limit) {
+    while (!stopping && Date.now() < deadline) {
+      if (claimed >= limit) break;
       const row = claimTx(); if (!row) break;
+      claimed++;
       inFlight.add(row.url);
       try {
         const outcome = await processRow(row, workerId);

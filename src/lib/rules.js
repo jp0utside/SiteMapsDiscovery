@@ -3,7 +3,14 @@ import { globToRegex } from './url.js';
 const rx = (s, flags = 'i') => new RegExp(s, flags);
 
 /** Compile rules.yaml into matchers. Everything the scanner needs at runtime lives here. */
-export function compileRules(raw) {
+export function compileRules(raw, detection = {}) {
+  const allow = new Set((detection.vendors || []).map(v => String(v).toLowerCase()));
+  const keep = (r) => allow.size === 0 || allow.has(String(r.vendor || '').toLowerCase());
+  raw = {
+    ...raw,
+    network: { ...(raw.network || {}), hosts: (raw.network?.hosts || []).filter(keep), paths: (raw.network?.paths || []).filter(keep), static_map_apis: (raw.network?.static_map_apis || []).filter(keep), tile_pattern: raw.network?.tile_pattern && keep(raw.network.tile_pattern) ? raw.network.tile_pattern : null },
+    embeds: (raw.embeds || []).filter(keep), globals: (raw.globals || []).filter(keep), selectors: (raw.selectors || []).filter(keep), static_html: (raw.static_html || []).filter(keep),
+  };
   const net = raw.network || {};
   const hosts = (net.hosts || []).map((r, i) => {
     const hasPath = r.pattern.includes('/');
@@ -22,6 +29,8 @@ export function compileRules(raw) {
   const nonGeo = rx((raw.non_geographic || {}).hint_regex || 'floor ?plan|seating');
   const identity = raw.identity || {};
   const cmp = raw.cmp || {};
+  const ignoreLinkSelectors = placement.ignore_link_selectors || [];
+  const ignoreLinkTextRegex = placement.ignore_link_text_regex ? rx(placement.ignore_link_text_regex) : null;
 
   function matchRequestUrl(url) {
     let host = '', hostPath = '';
@@ -43,14 +52,16 @@ export function compileRules(raw) {
 
   return {
     raw, hosts, paths, staticApis, tile, embeds, globals, selectors, staticHtml, interaction, placement, identity, cmp,
-    nonGeoRegex: nonGeo, mapAdjacentRegex: mapAdjacent,
+    nonGeoRegex: nonGeo, mapAdjacentRegex: mapAdjacent, ignoreLinkSelectors, ignoreLinkTextRegex,
+    vendorAllowlist: [...allow],
     matchRequestUrl, matchEmbedUrl, matchStaticMapUrl, matchStaticHtml, isMapAdjacent,
     /** Plain-data subset shipped into the browser for page.evaluate(). */
     forBrowser() {
       return {
         globals: globals.map(g => ({ id: g.id, name: g.name, expr: g.expr, vendor: g.vendor, type: g.type, confidence: g.confidence })),
         selectors: selectors.map(s => ({ id: s.id, selector: s.selector, vendor: s.vendor, type: s.type, confidence: s.confidence })),
-        embeds: embeds.map(e => ({ id: e.id, regex: e.regex, vendor: e.vendor, type: e.type, confidence: e.confidence, label: e.label })),
+        embeds: embeds.map(e => ({ id: e.id, regex: e.regex, vendor: e.vendor, type: e.type, confidence: e.confidence, label: e.label, identity_key: e.identity_key || null })),
+        ignoreLinkSelectors, ignoreLinkTextRegex: placement.ignore_link_text_regex || null,
         staticApis: staticApis.map(e => ({ id: e.id, regex: e.regex, vendor: e.vendor, type: e.type, confidence: e.confidence })),
         chromeSelectors: placement.chrome_selectors || [],
         mainSelectors: placement.main_content_selectors || [],

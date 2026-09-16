@@ -25,9 +25,18 @@ inventory:
   skip_extensions: [pdf, jpg, jpeg, png, gif, svg, webp, zip, doc, docx, xls, xlsx, ppt, pptx, csv, mp4, mp3, ics, xml, rss, json, txt]
   strip_query_params: ["utm_*", fbclid, gclid, mc_cid, mc_eid, dclid, msclkid]
 
+# What counts as a finding. Rules for every vendor stay in rules.yaml; this narrows which ones are live.
+detection:
+  vendors: [esri, esri-enterprise]  # allowlist of rule vendors; [] = every vendor in rules.yaml
+                                    # esri = ArcGIS Online / JS API; esri-enterprise = ArcGIS Enterprise & Geocortex viewers (gis.smcgov.org)
+  record_links: true                # keep <a href> links to map apps as flagged map_link_only findings (false = drop them)
+  links_trigger_render: false       # a page whose only signal is a link is NOT a tier-1 hit and is not rendered for that reason
+
 http:
   user_agent: "SMC-Map-Inventory/1.0 (internal web audit; contact: inventory@smcgis.org)"
   requests_per_second_per_host: 2   # rate limit applies PER HOST, not globally
+  respect_crawl_delay: true         # honour robots.txt Crawl-delay (www.smcgov.org asks for 10 s → ~40 h full run).
+                                    # Set false ONLY with the site owner's explicit approval of requests_per_second_per_host.
   timeout_ms: 30000
   max_retries: 3
   retry_backoff_ms: 15000            # exponential: 15s, 30s, 60s

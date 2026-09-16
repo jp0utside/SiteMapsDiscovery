@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+const major = Number(process.versions.node.split('.')[0]);
+if (major < 20) { console.error(`smc-map-inventory requires Node.js 20 or newer; this is ${process.version}. Use nvm/fnm to switch, then run \`npm rebuild\` for better-sqlite3.`); process.exit(1); }
 import { Command } from 'commander';
 import { TOOL_VERSION } from '../src/lib/config.js';
 

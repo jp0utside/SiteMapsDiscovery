@@ -60,7 +60,7 @@ network:
     - { regex: "[?&]request=GetFeature\\b",       vendor: ogc,       type: interactive_webmap, confidence: medium }
     - { regex: "/geoserver/",                     vendor: geoserver, type: interactive_webmap, confidence: high }
     - { regex: "/mapserver/",                     vendor: mapserver, type: interactive_webmap, confidence: high }
-    - { regex: "/arcgis/rest/services/",          vendor: esri,      type: interactive_webmap, confidence: high }
+    - { regex: "/arcgis/rest/services/",          vendor: esri-enterprise, type: interactive_webmap, confidence: high }
     - { regex: "/wms(\\?|/|$)",                   vendor: ogc,       type: interactive_webmap, confidence: medium }
     - { regex: "/wmts(\\?|/|$)",                  vendor: ogc,       type: interactive_webmap, confidence: medium }
     - { regex: "/wfs(\\?|/|$)",                   vendor: ogc,       type: interactive_webmap, confidence: medium }
@@ -95,22 +95,23 @@ embeds:
   - { regex: "arcg\\.is/",                       vendor: esri,     type: gis_application, confidence: medium, label: "ArcGIS short link" }
   - { regex: "google\\.com/maps/embed",          vendor: google,   type: interactive_webmap, confidence: high, label: "Google Maps Embed" }
   - { regex: "google\\.com/maps/d/",             vendor: google,   type: interactive_webmap, confidence: high, label: "Google My Maps" }
+  - { regex: "google\\.com/maps/(dir|place|search)/|google\\.com/maps\\?q=|maps\\.google\\.com/maps\\?q=", vendor: google, type: map_link_only, confidence: medium, label: "Google Maps directions/place link", identity_key: "link:google.com/maps" }
   - { regex: "google\\.com/maps(/|\\?|$)",       vendor: google,   type: interactive_webmap, confidence: medium, label: "Google Maps" }
   - { regex: "goo\\.gl/maps/",                   vendor: google,   type: interactive_webmap, confidence: medium, label: "Google Maps short link" }
   - { regex: "maps\\.app\\.goo\\.gl/",           vendor: google,   type: interactive_webmap, confidence: medium, label: "Google Maps short link" }
   - { regex: "maps\\.google\\.com/",             vendor: google,   type: interactive_webmap, confidence: medium, label: "Google Maps" }
   - { regex: "openstreetmap\\.org/export/embed", vendor: osm,      type: interactive_webmap, confidence: high, label: "OSM Embed" }
   - { regex: "openstreetmap\\.org/",             vendor: osm,      type: interactive_webmap, confidence: medium, label: "OpenStreetMap" }
-  - { regex: "/Html5Viewer/",                    vendor: vertigis, type: gis_application, confidence: high, label: "VertiGIS / Geocortex Html5Viewer" }
-  - { regex: "/Geocortex/",                      vendor: vertigis, type: gis_application, confidence: high, label: "Geocortex" }
+  - { regex: "/Html5Viewer/",                    vendor: esri-enterprise, type: gis_application, confidence: high, label: "Geocortex Html5Viewer (ArcGIS Enterprise)" }
+  - { regex: "/Geocortex/",                      vendor: esri-enterprise, type: gis_application, confidence: high, label: "Geocortex (ArcGIS Enterprise)" }
   - { regex: "public\\.tableau\\.com/",          vendor: tableau,  type: embedded_third_party, confidence: medium, label: "Tableau Public" }
   - { regex: "app\\.powerbi\\.com/",             vendor: powerbi,  type: embedded_third_party, confidence: medium, label: "Power BI" }
   - { regex: "datawrapper\\.dwcdn\\.net/",       vendor: datawrapper, type: thematic_chart_map, confidence: low, label: "Datawrapper" }
   - { regex: "public\\.flourish\\.studio/",      vendor: flourish, type: thematic_chart_map, confidence: low, label: "Flourish" }
   - { regex: "bing\\.com/maps",                  vendor: bing,     type: interactive_webmap, confidence: medium, label: "Bing Maps" }
   - { regex: "mapbox\\.com/",                    vendor: mapbox,   type: interactive_webmap, confidence: low, label: "Mapbox" }
-  - { regex: "gis\\.smcgov\\.org/",              vendor: smc-gis,  type: gis_application, confidence: medium, label: "County GIS host" }
-  - { regex: "/arcgis/(apps|rest)/",             vendor: esri,     type: gis_application, confidence: medium, label: "ArcGIS Enterprise" }
+  - { regex: "gis\\.smcgov\\.org/",              vendor: esri-enterprise, type: gis_application, confidence: medium, label: "County ArcGIS Enterprise host" }
+  - { regex: "/arcgis/(apps|rest)/",             vendor: esri-enterprise, type: gis_application, confidence: medium, label: "ArcGIS Enterprise" }
   - { regex: "\\bmaps?\\.[a-z0-9-]+\\.(gov|org|us)/", vendor: unknown, type: interactive_webmap, confidence: low, label: "Map subdomain" }
 
 # ---------------------------------------------------------------------------
@@ -221,6 +222,15 @@ placement:
     - ".layout-container > header, .layout-container > footer"
     - ".dialog-off-canvas-main-canvas > header, .dialog-off-canvas-main-canvas > footer"
     - ".toolbar, #toolbar-administration, .skip-link"
+  # Links inside these containers are library attribution ("© Mapbox", "© OpenStreetMap", "Powered by Esri"), not applications.
+  ignore_link_selectors:
+    - ".leaflet-control-attribution"
+    - ".mapboxgl-ctrl-attrib, .maplibregl-ctrl-attrib"
+    - ".ol-attribution"
+    - ".esri-attribution, .esriAttribution"
+    - ".gm-style-cc"
+    - "[class*=attribution]"
+  ignore_link_text_regex: "^\\s*(©|\\(c\\)|powered by|improve this map|terms)"
   main_content_selectors:   # used to break ties only; a match here overrides a chrome match found *above* it
     - main
     - "[role=main]"

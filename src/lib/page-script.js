@@ -5,6 +5,12 @@ export function pageScript(R) {
   const embeds = R.embeds.map(e => ({ ...e, re: new RegExp(e.regex, 'i') }));
   const staticApis = R.staticApis.map(e => ({ ...e, re: new RegExp(e.regex, 'i') }));
   const nonGeo = new RegExp(R.nonGeoRegex, 'i');
+  const ignoreText = R.ignoreLinkTextRegex ? new RegExp(R.ignoreLinkTextRegex, 'i') : null;
+  function isAttribution(el, text) {
+    if (ignoreText && text && ignoreText.test(text)) return true;
+    let n = el; while (n && n.nodeType === 1) { for (const s of R.ignoreLinkSelectors || []) if (safeMatches(n, s)) return true; n = parentOf(n); }
+    return false;
+  }
   const out = { title: document.title || '', globals: [], selectors: [], iframes: [], links: [], images: [], shadowRoots: 0 };
 
   function parentOf(n) { if (!n) return null; if (n.parentElement) return n.parentElement; const p = n.parentNode; if (p && p.nodeType === 11 && p.host) return p.host; return null; }
@@ -79,8 +85,10 @@ export function pageScript(R) {
     let abs; try { abs = new URL(el.getAttribute('href'), location.href).toString(); } catch { continue; }
     if (/^(mailto|tel|javascript):/i.test(abs)) continue;
     const rule = embeds.find(e => e.re.test(abs)); if (!rule) continue;
+    const text = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 120) || el.getAttribute('aria-label') || el.getAttribute('title') || null;
+    if (isAttribution(el, text)) continue;
     const pl = placement(el); const k = abs + '|' + pl; if (linkSeen.has(k)) continue; linkSeen.add(k);
-    out.links.push({ href: abs, matched: { id: rule.id, vendor: rule.vendor, type: rule.type, confidence: rule.confidence, label: rule.label }, text: (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 120) || el.getAttribute('aria-label') || el.getAttribute('title') || null, container: cssPath(el), placement: pl });
+    out.links.push({ href: abs, matched: { id: rule.id, vendor: rule.vendor, type: rule.type, confidence: rule.confidence, label: rule.label, identity_key: rule.identity_key || null }, text, container: cssPath(el), placement: pl });
   }
   // Static map images
   for (const el of all) {

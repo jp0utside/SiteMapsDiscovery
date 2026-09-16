@@ -289,3 +289,24 @@ belongs in the narrative of the final report.
    planned window.
 5. Launch `inventory`, then `scan` with `--max-runtime` sized to the window (resume as needed),
    then `arcgis` and `report`.
+
+### 9.7 Scope change and implementation status (2026-09-16)
+
+Further context narrowed the audit's subject to **ESRI / ArcGIS Online items embedded in county
+pages**; PDFs and Google Maps links are out of scope. Rather than removing rules, the scope is
+now configuration (`config.yaml → detection`), so the wider ruleset stays available:
+
+| Item | Status |
+|---|---|
+| Vendor allowlist `detection.vendors: [esri, esri-enterprise]` | implemented; other vendors' rules stay in rules.yaml but are inert |
+| ArcGIS Enterprise / Geocortex viewers on county hosts (§9.2 kind 1, decision: include) | implemented as vendor `esri-enterprise`, reported in their own group |
+| Esri links recorded and flagged, never a render trigger (§9.2 change B, decision: keep) | implemented: `detection.record_links: true`, `detection.links_trigger_render: false` |
+| Google directions links collapse to one identity (§9.2 change A) | implemented via `identity_key:` on the embed rule; moot under the Esri-only scope |
+| Attribution-link suppression (§9.5) | implemented (`placement.ignore_link_selectors` / `ignore_link_text_regex`) |
+| Trailing-slash identity duplicate (§9.3) | fixed: extension-less paths normalised to a trailing slash |
+| Crawl-delay (§9.1) | implemented: `http.respect_crawl_delay` (default **true**), announced loudly at startup; decision to override still rests with the site owner |
+| Node ≥ 20 check, exact `--limit`, runbook SQL quoting (§9.5) | done |
+| Sample rate | unchanged at 20% (decision: keep) |
+| Report | applications now carry `app_kind`, `hosting`, `embed_pages`, `linked_only`; report.html adds Linked-only, Enterprise-hosted and in-page JS API groups and states the detection scope |
+
+Fixture harness: 83/83 (a third phase runs the fixture under the production Esri-only scope).
