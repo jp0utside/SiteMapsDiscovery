@@ -22,6 +22,7 @@ const DEFAULTS = {
   screenshots: { mode: 'identity', dir: './screenshots', max_images: 1000, jpeg_quality: 70 },
   arcgis: { org_host: 'smcmaps.maps.arcgis.com', org_slug: 'smcmaps', item_types: [] },
   report: { dir: './output', probe_api_keys: true, title: 'Map Application Inventory', vendors: [] },
+  storage: { min_free_disk_mb: 200, check_every_pages: 50 },
   database: './inventory.sqlite',
 };
 

@@ -90,4 +90,8 @@ report:
   probe_api_keys: true               # single unauthenticated GET per key to detect referrer restriction
   title: "San Mateo County — www.smcgov.org ArcGIS Application Inventory"
 
+storage:
+  min_free_disk_mb: 200              # stop the run (pages stay pending) when the database volume has less free space than this
+  check_every_pages: 50
+
 database: ./inventory.sqlite

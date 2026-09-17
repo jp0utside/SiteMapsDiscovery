@@ -6,6 +6,7 @@ import { HttpClient } from '../lib/fetch.js';
 import { parseRobots } from '../lib/robots.js';
 import { hostOf } from '../lib/url.js';
 import { log, fmtDuration } from '../lib/log.js';
+import { freeBytes, mb } from '../lib/disk.js';
 
 /**
  * The one-command workflow for the SMC audit. Runs the settled configuration end to end:
@@ -31,7 +32,7 @@ export async function runCrawl(opts) {
   plan.push(`Stored HTML:        ${cfg.inventory.store_html || 'all'} (gzipped, in the database)`);
   plan.push(`Screenshots:        ${cfg.screenshots.mode} → ${path.resolve(cfg.screenshots.dir)} (cap ${cfg.screenshots.max_images})`);
   plan.push(`Tier-2 sample:      ${Math.round((cfg.scan.tier2_sample_rate || 0) * 100)}% of tier-1 misses rendered`);
-  plan.push(`Database:           ${path.resolve(cfg.database)}`);
+  plan.push(`Database:           ${path.resolve(cfg.database)} (${mb(freeBytes(cfg.database))} MB free on that volume; run stops below ${cfg.storage?.min_free_disk_mb || 0} MB)`);
   plan.push(`Max runtime:        ${cfg.scan.max_runtime_minutes ? cfg.scan.max_runtime_minutes + ' min (scan phase; re-run to resume)' : 'unbounded'}`);
   let robots = null;
   try { const http = new HttpClient(cfg.http); const r = await http.getText(cfg.seeds.robots, { accept: 'text/plain,*/*' }); await http.close(); if (r.status === 200) robots = parseRobots(r.text, 'smc-map-inventory'); plan.push(`robots.txt fetched:  HTTP ${r.status}${robots?.crawlDelay ? `, Crawl-delay ${robots.crawlDelay}s declared` : ''}`); }
@@ -52,6 +53,7 @@ export async function runCrawl(opts) {
   const phase = async (name, fn) => { const t = Date.now(); log.info(`===== ${name} starting =====`); const r = await fn(); phases[name] = Date.now() - t; log.info(`===== ${name} done in ${fmtDuration(phases[name])} =====`); return r || {}; };
   const sub = { ...opts, plan: undefined, confirm: undefined };
   const halt = (r, name) => {
+    if (r.diskFull) { console.log(`\nrun-crawl STOPPED during ${name}: disk space is low. Nothing is lost; free space (or set inventory.store_html: hits) and re-run run-crawl to resume.`); return true; }
     if (r.blocked) { console.log(`\nrun-crawl STOPPED during ${name}: the host is rejecting requests. Nothing was marked clean; unfinished pages stay pending. Check with the web team (WAF / rate limit), then re-run run-crawl to resume.`); return true; }
     if (r.interrupted) { console.log(`\nrun-crawl interrupted during ${name}. Progress is saved; re-run run-crawl to resume.`); return true; }
     return false;
