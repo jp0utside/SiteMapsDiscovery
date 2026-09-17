@@ -12,7 +12,7 @@ export class HttpClient {
     const opts = { connect: { timeout: httpCfg.timeout_ms || 30000 }, headersTimeout: httpCfg.timeout_ms || 30000, bodyTimeout: httpCfg.timeout_ms || 30000 };
     this.dispatcher = (process.env.HTTPS_PROXY || process.env.https_proxy) ? new EnvHttpProxyAgent(opts) : new Agent(opts);
   }
-  async get(url, { accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', maxBytes, headers = {}, rateLimit = true, maxRedirects = 5 } = {}) {
+  async get(url, { accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', maxBytes, headers = {}, rateLimit = true, maxRedirects = 5, htmlOnly = false } = {}) {
     let current = url; const chain = [];
     for (let i = 0; i <= maxRedirects; i++) {
       if (rateLimit) await this.limiter.wait(hostOf(current));
@@ -29,6 +29,8 @@ export class HttpClient {
       }
       const ctype = String(res.headers['content-type'] || '');
       const limit = maxBytes || this.cfg.max_html_bytes || 5_000_000;
+      // htmlOnly: the caller discards non-HTML anyway, so don't download the file (PDFs behind extensionless URLs).
+      if (htmlOnly && status < 400 && !isHtml(ctype)) { res.body.on('error', () => {}); try { res.body.destroy(); } catch {} return { status, headers: res.headers, contentType: ctype, body: Buffer.alloc(0), finalUrl: current, redirects: chain, truncated: true }; }
       const chunks = []; let size = 0; let truncated = false;
       for await (const c of res.body) { size += c.length; if (size > limit) { truncated = true; break; } chunks.push(c); }
       if (truncated) { try { res.body.destroy(); } catch {} }

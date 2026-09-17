@@ -90,7 +90,7 @@ export async function inventory(opts) {
 
     const processOne = async (url) => {
       let res;
-      try { res = await http.getText(url); }
+      try { res = await http.getText(url, { htmlOnly: true }); }
       catch (e) {
         stats.errors++; health.record(null);
         const max = cfg.http.max_retries || 3; const backoff = (cfg.http.retry_backoff_ms || 15000) * 2;
