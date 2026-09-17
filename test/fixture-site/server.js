@@ -72,7 +72,9 @@ const pages = {
   '/dpw/viewers': chrome('Public Works viewers', `<h1>Viewers</h1><ul><li><a href="https://gis.smcgov.org/apps/publicviewer">Public viewer</a></li><li><a href="https://gis.smcgov.org/apps/publicviewer/">Public viewer (trailing slash)</a></li>
     <li><a href="http://maps.smcgov.org/apps/parcels/index.html">Parcel map (maps.smcgov.org)</a></li>
     <li><a href="https://services.arcgis.com/${ORG_ID}/arcgis/rest/services/Parcels/FeatureServer/0">Parcels feature service</a></li>
-    <li><a href="https://services.arcgis.com/OTHERORG99/arcgis/rest/services/Vendor_Layer/FeatureServer">Vendor feature service</a></li></ul>`),
+    <li><a href="https://services.arcgis.com/OTHERORG99/arcgis/rest/services/Vendor_Layer/FeatureServer">Vendor feature service</a></li>
+    <li><a href="https://apps.geocortex.com/webviewer/?app=abc123">Geocortex cloud viewer</a></li>
+    <li><a href="https://smc.apps.vertigisstudio.com/web/?app=parcels">VertiGIS Studio app</a></li></ul>`),
   '/hsa/find-services': chrome('Find Services Near You', `<h1>Find Services</h1><p><a href="https://www.google.com/maps/place/1+Tower+Rd+San+Mateo">Get Directions</a></p><button id="showmap" type="button">Show map</button><div id="mapwrap"></div>
     <script>document.getElementById('showmap').addEventListener('click', () => { const f = document.createElement('iframe'); f.src = 'https://www.google.com/maps/d/embed?mid=1XyZ_abc123&hl=en'; f.width = 640; f.height = 480; document.getElementById('mapwrap').appendChild(f); });</script>`),
   '/parks/seating': chrome('Seating chart', `<h1>Amphitheater seating chart</h1><figure><div id="seatmap" style="height:300px"></div><figcaption>Seat map — floor plan of the venue</figcaption></figure>
