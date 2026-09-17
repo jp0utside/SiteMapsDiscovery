@@ -1,5 +1,6 @@
 import { loadConfig } from '../lib/config.js';
 import { openDb, getMeta } from '../lib/db.js';
+import { freeBytes, mb } from '../lib/disk.js';
 
 /** Read-only snapshot of a run (safe to call from a second terminal while the crawl is running). */
 export async function status(opts) {
@@ -20,7 +21,10 @@ export async function status(opts) {
   const apps = all('SELECT vendor, COUNT(*) c FROM applications GROUP BY vendor ORDER BY c DESC');
   line('applications', `${row('SELECT COUNT(*) c FROM applications').c} — ` + (apps.map(r => `${r.vendor} ${r.c}`).join(', ') || 'none'));
   line('findings', row('SELECT COUNT(*) c FROM findings').c);
-  line('pages stored', `${row('SELECT COUNT(*) c FROM pages').c} (${(row('SELECT COALESCE(SUM(LENGTH(html_gz)),0) b FROM pages').b / 1048576).toFixed(1)} MB gzipped)`);
+  const stored = row('SELECT COUNT(*) c FROM pages').c, storedB = row('SELECT COALESCE(SUM(LENGTH(html_gz)),0) b FROM pages').b, totalUrls = row('SELECT COUNT(*) c FROM urls').c;
+  line('pages stored', `${stored} (${(storedB / 1048576).toFixed(1)} MB gzipped${stored ? `; projected for all ${totalUrls} URLs: ${(storedB / stored * totalUrls / 1048576).toFixed(0)} MB` : ''})`);
+  line('free disk', `${mb(freeBytes(cfg.database))} MB on the database volume (run stops below ${cfg.storage?.min_free_disk_mb || 0} MB)`);
+  const diskFull = getMeta(db, 'disk_full_at'); if (diskFull) line('DISK STOP', diskFull);
   const failed = all(`SELECT url, error FROM urls WHERE status='failed' ORDER BY last_attempt_at DESC LIMIT 5`);
   line('failed', `${row(`SELECT COUNT(*) c FROM urls WHERE status='failed'`).c}` + (failed.length ? '\n' + failed.map(f => `    ${f.url}\n      ${f.error}`).join('\n') : ''));
   const retrying = all(`SELECT url, attempts, error, retry_after FROM urls WHERE status='pending' AND attempts>0 ORDER BY last_attempt_at DESC LIMIT 5`);

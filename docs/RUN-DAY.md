@@ -85,6 +85,13 @@ node bin/cli.js status
 - `URL cap of 50000 reached`. Should not happen (the site has about 11,600); if it does, discovery
   is truncated and the report will say so.
 
+**Project the storage** after the first few hundred pages: `status` prints `pages stored: N (X MB
+gzipped; projected for all 11,6xx URLs: Y MB)`. If Y is more than you can afford, Ctrl-C, set
+`inventory.store_html: hits` in `config.yaml` (keeps HTML only for pages with a finding, about a
+tenth of the size), and re-run; pages already stored are kept. `status` also shows free disk. The
+run stops itself, loudly, if the database volume drops below `storage.min_free_disk_mb` (200 MB),
+leaving unfinished pages pending; free space and re-run.
+
 **Stop everything** when you see the banner:
 
 ```
@@ -135,7 +142,7 @@ The terminal prints `run-crawl finished in …` with per-phase timings and the o
 | `requires Node.js 20 or newer` | switch with nvm/fnm, then `npm rebuild` (better-sqlite3 is compiled per Node version) |
 | `Executable doesn't exist` from Playwright | `npx playwright install chromium` |
 | `robots.txt fetch: FAILED` in the plan | no network path to www.smcgov.org; check VPN / proxy before starting |
-| `no space left on device` | delete `screenshots/` (recapture later with `screenshots`) or set `inventory.store_html: hits` in config.yaml before resuming |
+| `LOW DISK … Stopping` banner, or `no space left on device` | free space, delete `screenshots/` (recapture later with `screenshots`), or set `inventory.store_html: hits` in config.yaml; then re-run to resume |
 | Crash or forced kill mid-run | just re-run `run-crawl`; rows stuck `in_progress` reset after 10 minutes, or immediately with `node bin/cli.js scan --reset-in-progress` |
 | Report looks thin | run `node bin/cli.js status`; if `pending` is not 0 the run did not finish; resume |
 | `arcgis cross-reference failed` | the crawl is unaffected; run `node bin/cli.js arcgis` then `node bin/cli.js report` later |

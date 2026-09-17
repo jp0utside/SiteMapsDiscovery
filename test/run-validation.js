@@ -260,6 +260,19 @@ try {
     const sw = runW(['status']);
     check('WAF: status shows BLOCKED and the 403 count', /BLOCKED:/.test(sw.stdout) && /403×\d+/.test(sw.stdout));
   } finally { server2.kill(); }
+
+  // ---- Phase F: disk guard (threshold set impossibly high so it trips immediately)
+  console.log('\n=== Phase F: disk-space guard ===');
+  const diskCfg = fs.readFileSync('test/out/config-prod.yaml', 'utf8').replace('database: ./test/out/prod.sqlite', 'database: ./test/out/disk.sqlite') + '\nstorage: { min_free_disk_mb: 999999999, check_every_pages: 50 }\n';
+  fs.writeFileSync('test/out/config-disk.yaml', diskCfg);
+  const rd = spawnSync('node', ['bin/cli.js', '-c', 'test/out/config-disk.yaml', 'run-crawl', '--no-confirm', '--screenshots', 'none'], { encoding: 'utf8' });
+  const outD = rd.stdout + rd.stderr;
+  check('disk guard: run-crawl stops loudly when free space is below the threshold', rd.status === 0 && /LOW DISK/.test(outD) && /run-crawl STOPPED during inventory: disk space is low/.test(outD) && !/===== scan starting/.test(outD), outD.slice(-300));
+  const sd = spawnSync('node', ['bin/cli.js', '-c', 'test/out/config-disk.yaml', 'status'], { encoding: 'utf8' });
+  check('status: shows free disk, the stored-HTML projection and the DISK STOP flag', /free disk:\s+\d+ MB/.test(sd.stdout) && /DISK STOP:/.test(sd.stdout));
+  const sp = runP(['status']);
+  check('status: projects stored-HTML size for the whole queue', /projected for all \d+ URLs: \d+ MB/.test(sp.stdout));
+  check('run-crawl --plan: reports free disk on the database volume', /MB free on that volume/.test(plan.stdout));
 } finally { server.kill(); }
 
 console.log(`\n${results.length - failures}/${results.length} checks passed${failures ? `, ${failures} FAILED` : ''}`);

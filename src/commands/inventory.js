@@ -11,6 +11,7 @@ import { applyDetectionPolicy, isHit } from '../lib/detection.js';
 import { applyCrawlDelay } from '../lib/robots.js';
 import { hostOf } from '../lib/url.js';
 import { HealthMonitor, isBlockStatus } from '../lib/health.js';
+import { diskGuard } from '../lib/disk.js';
 
 /**
  * Phase 1 — populate the urls table: sitemaps → robots.txt → BFS same-host link crawl.
@@ -79,7 +80,9 @@ export async function inventory(opts) {
     const concurrency = Math.max(1, Math.min(8, cfg.scan.concurrency || 3));
     const health = new HealthMonitor({ window: cfg.http.block_window, threshold: cfg.http.block_threshold });
     const markRetry = db.prepare(`UPDATE urls SET attempts=attempts+1, error=?, last_attempt_at=?, retry_after=?, status=CASE WHEN attempts+1 >= ? THEN 'failed' ELSE status END, links_done=CASE WHEN attempts+1 >= ? THEN 1 ELSE links_done END WHERE url=?`);
-    const t0 = Date.now(); let processed = 0; let stopping = false; let blocked = false;
+    const t0 = Date.now(); let processed = 0; let stopping = false; let blocked = false; let diskFull = false;
+    const checkDisk = () => { if (diskFull) return; const m = diskGuard(cfg); if (m) { diskFull = true; stopping = true; setMeta(db, 'disk_full_at', JSON.stringify({ at: now(), phase: 'inventory', message: m })); log.loud(m); } };
+    checkDisk();
     const logNew = (url, newApps) => { for (const f of newApps) log.info(`NEW application ${f.identity_key} [${f.vendor}/${f.type}/${f.placement}] on ${url}`); };
     const onSig = () => { if (stopping) process.exit(130); stopping = true; log.warn('Ctrl-C: finishing in-flight fetches, then exiting (re-run inventory to continue).'); };
     process.on('SIGINT', onSig); process.on('SIGTERM', onSig);
@@ -141,13 +144,14 @@ export async function inventory(opts) {
       let i = 0;
       await Promise.all(Array.from({ length: concurrency }, async () => { while (i < batch.length && !stopping) {
         const u = batch[i++]; await processOne(u); processed++;
+        if (processed % (cfg.storage?.check_every_pages || 50) === 0) checkDisk();
         if (cfg.http.stop_on_block !== false && health.isBlocked() && !blocked) { blocked = true; stopping = true; setMeta(db, 'blocked_at', JSON.stringify({ at: now(), phase: 'inventory', summary: health.summary() })); log.loud(`HOST IS REJECTING REQUESTS (${health.summary()}). Stopping the crawl so the inventory is not falsely clean. Unfinished pages stay pending; investigate (WAF? rate limit?) then re-run to resume.`); }
         if (processed % 25 === 0) { const rem = db.prepare(`SELECT COUNT(*) c FROM urls WHERE links_done=0 AND status IN ('pending','done')`).get().c; const el = Date.now() - t0; const apps = db.prepare('SELECT COUNT(*) c FROM applications').get().c; log.info(`crawl: ${processed} fetched, ${total} known, ${rem} to crawl, ${stats.crawl} new via links, ${apps} applications so far, http ${health.summary()}, elapsed ${fmtDuration(el)}, ETA ${fmtDuration(rem * el / processed / 1)}`); } } }));
       if (capReached && !db.prepare(`SELECT 1 FROM urls WHERE links_done=0 AND status IN ('pending','done') LIMIT 1`).get()) break;
     }
     process.off('SIGINT', onSig); process.off('SIGTERM', onSig);
-    log.info(`BFS crawl ${blocked ? 'STOPPED (host rejecting requests)' : stopping ? 'interrupted' : 'complete'}: ${processed} pages fetched in ${fmtDuration(Date.now() - t0)}; http totals ${health.totals()}`);
-    stats.interrupted = stopping && !blocked; stats.blocked = blocked;
+    log.info(`BFS crawl ${blocked ? 'STOPPED (host rejecting requests)' : diskFull ? 'STOPPED (low disk)' : stopping ? 'interrupted' : 'complete'}: ${processed} pages fetched in ${fmtDuration(Date.now() - t0)}; http totals ${health.totals()}`);
+    stats.interrupted = stopping && !blocked && !diskFull; stats.blocked = blocked; stats.diskFull = diskFull;
   }
 
   await http.close();

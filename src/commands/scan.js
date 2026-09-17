@@ -16,6 +16,7 @@ import { log, fmtDuration } from '../lib/log.js';
 import { applyDetectionPolicy, isHit } from '../lib/detection.js';
 import { applyCrawlDelay } from '../lib/robots.js';
 import { HealthMonitor, isBlockStatus } from '../lib/health.js';
+import { diskGuard } from '../lib/disk.js';
 
 /**
  * Phase 2 — scan: tier 1 (static fetch, every URL) + tier 2 (headless render of hits, map-adjacent URLs and a random sample).
@@ -92,7 +93,8 @@ export async function scan(opts) {
   log.info(`detection: vendors ${rules.vendorAllowlist.length ? rules.vendorAllowlist.join(',') : 'ALL'}; links ${cfg.detection.record_links === false ? 'dropped' : 'recorded (flagged)'}; links trigger render: ${cfg.detection.links_trigger_render !== false}`);
 
   const health = new HealthMonitor({ window: cfg.http.block_window, threshold: cfg.http.block_threshold });
-  let blocked = false;
+  let blocked = false, diskFull = false;
+  const checkDisk = () => { if (diskFull) return; const m = diskGuard(cfg); if (m) { diskFull = true; stopping = true; setMeta(db, 'disk_full_at', JSON.stringify({ at: now(), phase: 'scan', message: m })); log.loud(m); } };
   const checkBlocked = (phase) => { if (blocked || cfg.http.stop_on_block === false || !health.isBlocked()) return; blocked = true; stopping = true; setMeta(db, 'blocked_at', JSON.stringify({ at: now(), phase, summary: health.summary() })); log.loud(`HOST IS REJECTING REQUESTS (${health.summary()}). Stopping the scan so the inventory is not falsely clean. Unfinished pages stay pending; investigate (WAF? rate limit?) then re-run to resume.`); };
   const logNew = (url, newApps) => { for (const f of newApps) log.info(`NEW application ${f.identity_key} [${f.vendor}/${f.type}/${f.placement}] on ${url}`); };
   const t0 = Date.now(); const deadline = cfg.scan.max_runtime_minutes ? t0 + cfg.scan.max_runtime_minutes * 60000 : Infinity;
@@ -183,21 +185,24 @@ export async function scan(opts) {
       } finally { inFlight.delete(row.url); }
       completed++;
       checkBlocked('scan');
+      if (completed % (cfg.storage?.check_every_pages || 50) === 0) checkDisk();
       if (completed % 10 === 0) progress();
     }
   }
   log.info(`scan starting: ${total} URLs in scope for this pass, ${remainingStmt.get().c} remaining`);
+  checkDisk();
   const n = Math.max(1, Number(cfg.scan.concurrency) || 3);
   await Promise.all(Array.from({ length: n }, (_, i) => worker(i)));
   progress();
   if (Date.now() >= deadline) log.warn(`max_runtime_minutes (${cfg.scan.max_runtime_minutes}) reached; stopping. Re-run scan to resume.`);
   if (stopping && !blocked) log.warn('interrupted; re-run scan to resume where it left off.');
   if (blocked) log.loud(`scan STOPPED because the host is rejecting requests (${health.summary()}). ${remainingStmt.get().c} URLs remain pending.`);
+  if (diskFull) log.loud(`scan STOPPED because disk space is low. ${remainingStmt.get().c} URLs remain pending.`);
   log.info(`http totals this run: ${health.totals() || 'none'}`);
   process.off('SIGINT', onSig); process.off('SIGTERM', onSig);
   await pool.close(); await http.close();
   store.refreshCounts();
-  const summary = { completed, hits, rendered, failed, skipped, interrupted: stopping && !blocked, blocked, elapsed_ms: Date.now() - t0, tiers, consent: consent.enabled };
+  const summary = { completed, hits, rendered, failed, skipped, interrupted: stopping && !blocked && !diskFull, blocked, diskFull, elapsed_ms: Date.now() - t0, tiers, consent: consent.enabled };
   finishRun(db, runId, summary);
   const byStatus = db.prepare('SELECT status, COUNT(*) c FROM urls GROUP BY status').all();
   log.info('scan summary:', JSON.stringify(summary));
