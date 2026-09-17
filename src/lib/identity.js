@@ -31,6 +31,9 @@ export function resolveIdentity(targetUrl, rules, matchedRule = null) {
   if (/(^|\.)arcgis\.com$/.test(host) || /\/arcgis\/apps\//i.test(u.pathname)) {
     const m = host.match(/^([a-z0-9-]+)\.maps\.arcgis\.com$/);
     if (m) out.arcgisOrg = m[1];
+    // 1a. AGOL hosted services: services.arcgis.com/<orgId>/arcgis/rest/services/<Name>/FeatureServer[/0]
+    const svc = u.pathname.match(/^\/(?:tiles\/)?([A-Za-z0-9]{8,32})\/arcgis\/rest\/services\/(.+?)\/(FeatureServer|MapServer|ImageServer|VectorTileServer|SceneServer)\b/i);
+    if (svc && /^(services|tiles)\d*\.arcgis\.com$/.test(host)) { out.arcgisOrgId = svc[1]; out.key = `arcgis:service:${svc[1]}/${svc[2]}`; out.serviceName = svc[2]; return out; }
     let id = q.get('id') || q.get('appid') || q.get('webmap');
     if (!id) {
       const pm = u.pathname.match(/\/(experience|dashboards|opsdashboard|stories|collections|instant\/[a-z0-9_-]+|apps\/[A-Za-z]+)\/([0-9a-f]{32})\b/i) || u.pathname.match(HEX32);

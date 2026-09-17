@@ -19,6 +19,10 @@ network:
     - { pattern: "events.mapbox.com",          vendor: mapbox,        type: interactive_webmap, confidence: high }
     - { pattern: "js.arcgis.com",              vendor: esri,          type: interactive_webmap, confidence: high }
     - { pattern: "smcmaps.maps.arcgis.com",    vendor: esri,          type: gis_application,   confidence: high }
+    - { pattern: "services.arcgis.com",        vendor: esri,          type: interactive_webmap, confidence: high }   # AGOL hosted feature/map services (org id in path)
+    - { pattern: "tiles.arcgis.com",           vendor: esri,          type: interactive_webmap, confidence: high }
+    - { pattern: "gis.smcgov.org",             vendor: esri-enterprise, type: gis_application, confidence: high }   # county ArcGIS Enterprise / Geocortex
+    - { pattern: "maps.smcgov.org",            vendor: esri-enterprise, type: gis_application, confidence: high }   # county map host
     - { pattern: "*.arcgis.com",               vendor: esri,          type: gis_application,   confidence: medium }
     - { pattern: "*.arcgisonline.com",         vendor: esri,          type: interactive_webmap, confidence: high }
     - { pattern: "tile.openstreetmap.org",     vendor: osm,           type: interactive_webmap, confidence: high }
@@ -110,7 +114,10 @@ embeds:
   - { regex: "public\\.flourish\\.studio/",      vendor: flourish, type: thematic_chart_map, confidence: low, label: "Flourish" }
   - { regex: "bing\\.com/maps",                  vendor: bing,     type: interactive_webmap, confidence: medium, label: "Bing Maps" }
   - { regex: "mapbox\\.com/",                    vendor: mapbox,   type: interactive_webmap, confidence: low, label: "Mapbox" }
+  - { regex: "services\\.arcgis\\.com/[^/]+/arcgis/rest/services/", vendor: esri, type: interactive_webmap, confidence: high, label: "ArcGIS Online hosted service (FeatureServer/MapServer)" }
+  - { regex: "tiles\\.arcgis\\.com/tiles/[^/]+/arcgis/rest/services/", vendor: esri, type: interactive_webmap, confidence: high, label: "ArcGIS Online hosted tile service" }
   - { regex: "gis\\.smcgov\\.org/",              vendor: esri-enterprise, type: gis_application, confidence: medium, label: "County ArcGIS Enterprise host" }
+  - { regex: "maps\\.smcgov\\.org/",             vendor: esri-enterprise, type: gis_application, confidence: medium, label: "County map host (maps.smcgov.org)" }
   - { regex: "/arcgis/(apps|rest)/",             vendor: esri-enterprise, type: gis_application, confidence: medium, label: "ArcGIS Enterprise" }
   - { regex: "\\bmaps?\\.[a-z0-9-]+\\.(gov|org|us)/", vendor: unknown, type: interactive_webmap, confidence: low, label: "Map subdomain" }
 

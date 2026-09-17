@@ -37,7 +37,7 @@ export async function report(opts) {
   for (const a of apps) {
     const k = kindStmt.get(a.identity_key) || {};
     a.app_kind = appKind(k.rule, k.signal_type, a);
-    a.hosting = a.arcgis_item_id ? 'ArcGIS Online' : a.vendor === 'esri-enterprise' ? 'ArcGIS Enterprise (county)' : a.vendor === 'esri' ? 'Esri (no item id)' : a.vendor;
+    a.hosting = a.arcgis_item_id ? 'ArcGIS Online' : a.identity_key.startsWith('arcgis:service:') ? 'ArcGIS Online hosted service' : a.vendor === 'esri-enterprise' ? 'ArcGIS Enterprise (county)' : a.vendor === 'esri' ? 'Esri (no item id)' : a.vendor;
     a.linked_only = a.main_content_pages > 0 && a.embed_pages === 0 ? 1 : 0;
     a.placement_summary = a.main_content_pages === 0 && a.site_chrome_pages > 0 ? 'site-wide navigation' : a.site_chrome_pages > 0 ? 'content + navigation' : 'content';
     a.example_url = a.example_main_url || a.first_seen_url;
@@ -105,10 +105,11 @@ export async function report(opts) {
     org,
     embedded: apps.filter(a => a.arcgis_item_id && a.in_county_org === 1 && !a.linked_only),
     linked_only_org: apps.filter(a => a.arcgis_item_id && a.in_county_org === 1 && a.linked_only),
-    external: apps.filter(a => a.arcgis_item_id && a.in_county_org === 0),
+    external: apps.filter(a => (a.arcgis_item_id || a.identity_key.startsWith('arcgis:service:')) && a.in_county_org === 0),
+    services: apps.filter(a => a.identity_key.startsWith('arcgis:service:')),
     unknown: apps.filter(a => a.arcgis_item_id && a.in_county_org == null),
     enterprise: apps.filter(a => !a.arcgis_item_id && a.vendor === 'esri-enterprise'),
-    esri_inpage: apps.filter(a => !a.arcgis_item_id && a.vendor === 'esri'),
+    esri_inpage: apps.filter(a => !a.arcgis_item_id && a.vendor === 'esri' && !a.identity_key.startsWith('arcgis:service:')),
     orphaned: org ? db.prepare(`SELECT * FROM arcgis_items i WHERE i.in_org=1 AND i.org_id=? AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.arcgis_item_id=i.item_id) ORDER BY modified DESC`).all(org.id) : [],
     org_item_count: org ? cnt('SELECT COUNT(*) c FROM arcgis_items WHERE in_org=1 AND org_id=?', org.id) : 0,
     non_arcgis_external: apps.filter(a => !a.arcgis_item_id && !a.identity_key.startsWith('inpage:') && !/smcgov\.org/i.test(a.identity_key)),
@@ -129,6 +130,7 @@ export async function report(opts) {
     by_vendor: db.prepare('SELECT vendor, COUNT(*) c FROM applications GROUP BY vendor ORDER BY c DESC').all().filter(r => inReport(r.vendor)),
     by_type: Object.entries(apps.reduce((m, a) => (m[a.type] = (m[a.type] || 0) + 1, m), {})).map(([type, c]) => ({ type, c })).sort((x, y) => y.c - x.c),
     applications_all_vendors: appsAll, report_vendors: [...reportVendors],
+    requests_recorded: cnt('SELECT COUNT(*) c FROM requests'), request_hosts: cnt(`SELECT COUNT(DISTINCT substr(request_url, instr(request_url, '//') + 2, instr(substr(request_url, instr(request_url, '//') + 2), '/') - 1)) c FROM requests`),
     pages_stored: cnt('SELECT COUNT(*) c FROM pages'), pages_stored_bytes: (db.prepare('SELECT COALESCE(SUM(LENGTH(html_gz)),0) b FROM pages').get().b),
     pages_with_maps: reportVendors.size ? new Set(occ.filter(o => o.how !== 'link').map(o => o.page_url)).size : cnt(`SELECT COUNT(DISTINCT url) c FROM findings WHERE placement='main_content' AND type<>'map_link_only'`),
   };

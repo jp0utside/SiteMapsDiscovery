@@ -349,3 +349,19 @@ Fixture harness: 96/96 (Phase D exercises `run-crawl`, stored HTML, the report f
 - Progress lines include the HTTP status mix of recent requests, pages-with-maps, and the
   application count; a `NEW application` line is printed on first sighting; `status` gives a
   read-only snapshot from a second terminal. Harness: 104/104.
+
+### 9.10 Additional public URL hosts from the AGOL library inventory (2026-09-17)
+
+A colleague's ArcGIS Online library inventory (columns itemUrl / detailsPageUrl / publicUrl)
+surfaced `services.arcgis.com`, `maps.smcgov.org`, `gis.smcgov.org` and
+`www.arcgis.com/apps/dashboards/`. Checked against the rules: dashboards and item detail pages were
+fully covered; `gis.smcgov.org` was covered as a link/embed but not as a render-time request;
+`maps.smcgov.org` only matched a generic low-confidence rule (vendor `unknown`, so filtered out of
+the Esri report); `services.arcgis.com` matched but was mislabelled Esri Enterprise.
+
+Changes: host rules for `gis.smcgov.org` and `maps.smcgov.org` (`esri-enterprise`) and
+`services.arcgis.com` / `tiles.arcgis.com` (`esri`); hosted services keyed
+`arcgis:service:<orgId>/<ServiceName>` with the org id driving `in_county_org` and a "hosted
+services referenced by pages" report section; and `scan.record_all_requests` keeps every
+render-time request (matched or not) so hosts nobody listed can be searched offline. Individual
+URLs need not be inventoried — rules match by host and path pattern. Harness: 116/116.

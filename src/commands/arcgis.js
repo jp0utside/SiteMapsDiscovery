@@ -63,8 +63,13 @@ export async function arcgis(opts) {
       log.warn(`item ${a.arcgis_item_id}: not readable (${e.message.split('\n')[0]}) — ownership unknown`);
     }
   }
+  // Hosted services carry the org id in their identity: arcgis:service:<orgId>/<Name>
+  const svcs = db.prepare(`SELECT identity_key FROM applications WHERE identity_key LIKE 'arcgis:service:%'`).all();
+  let svcIn = 0, svcOut = 0;
+  for (const a of svcs) { const oid = a.identity_key.slice('arcgis:service:'.length).split('/')[0]; const inOrg = oid === orgId ? 1 : 0; db.prepare('UPDATE applications SET in_county_org=? WHERE identity_key=?').run(inOrg, a.identity_key); if (inOrg) svcIn++; else { svcOut++; log.warn(`EXTERNAL hosted service ${a.identity_key} (org ${oid})`); } }
+  if (svcs.length) log.info(`hosted services: ${svcIn} in org, ${svcOut} external`);
   const orphaned = db.prepare(`SELECT COUNT(*) c FROM arcgis_items i WHERE i.in_org=1 AND i.org_id=? AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.arcgis_item_id=i.item_id)`).get(orgId).c;
-  const summary = { org_id: orgId, org_items: total, embedded, orphaned, external, unknown };
+  const summary = { org_id: orgId, org_items: total, embedded, orphaned, external, unknown, services_in_org: svcIn, services_external: svcOut };
   finishRun(db, runId, summary);
   log.info('arcgis cross-reference:', JSON.stringify(summary));
   await http.close(); db.close();
