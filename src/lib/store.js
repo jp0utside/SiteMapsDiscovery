@@ -28,6 +28,7 @@ export class Store {
       updApp: db.prepare('UPDATE applications SET type=?, title=COALESCE(title,?), screenshot_path=COALESCE(screenshot_path,?), target_url=COALESCE(target_url,?) WHERE identity_key=?'),
     };
     this.txStore = db.transaction((url, tier, findings, requests) => {
+      const newApps = [];
       this.stmts.delFindings.run(url, tier);
       if (tier === 2) {
         // a rendered container (selector/global/network with a concrete container) supersedes every tier-1 placeholder;
@@ -53,9 +54,10 @@ export class Store {
       for (const f of findings) {
         this.stmts.insFinding.run({ ...f, tier, detected_at: t, width_px: f.width_px ?? null, height_px: f.height_px ?? null, api_key: f.api_key ?? null, arcgis_org: f.arcgis_org ?? null, container_selector: f.container_selector ?? null, target_url: f.target_url ?? null, flagged: f.flagged ? 1 : 0, rule: f.rule ?? null });
         const app = this.stmts.getApp.get(f.identity_key);
-        if (!app) this.stmts.insApp.run(f.identity_key, f.vendor, f.type, f.title || null, f.screenshot_path || null, url, f.arcgis_item_id || null, f.target_url || null, t, isPerPageIdentity(f.identity_key) ? 1 : 0);
+        if (!app) { this.stmts.insApp.run(f.identity_key, f.vendor, f.type, f.title || null, f.screenshot_path || null, url, f.arcgis_item_id || null, f.target_url || null, t, isPerPageIdentity(f.identity_key) ? 1 : 0); newApps.push(f); }
         else this.stmts.updApp.run(typeRank(f.type) > typeRank(app.type) ? f.type : app.type, f.title || null, f.screenshot_path || null, f.target_url || null, f.identity_key);
       }
+      return newApps;
     });
   }
   /** Keep the fetched HTML (gzipped) so rules can be re-run offline. mode: all | hits | none */
@@ -73,7 +75,8 @@ export class Store {
     const rows = this.db.prepare(`SELECT DISTINCT identity_key, vendor FROM findings WHERE url=? AND placement='main_content' AND (identity_key LIKE 'arcgis:item:%' OR identity_key LIKE 'mapbox:style:%' OR identity_key LIKE 'gmymaps:%')`).all(url);
     const m = new Map(); for (const r of rows) { if (!m.has(r.vendor)) m.set(r.vendor, new Set()); m.get(r.vendor).add(r.identity_key); } return m;
   }
-  store(url, tier, findings, requests) { this.txStore(url, tier, findings, requests); }
+  /** Persist one page's findings; returns the findings that created a NEW application (first sighting). */
+  store(url, tier, findings, requests) { return this.txStore(url, tier, findings, requests); }
   /** Recompute occurrence counts (distinct pages per application) — cheap and always consistent. */
   refreshCounts() {
     this.db.exec(`UPDATE applications SET occurrence_count = (

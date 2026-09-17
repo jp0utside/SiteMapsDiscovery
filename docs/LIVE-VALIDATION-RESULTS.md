@@ -337,3 +337,15 @@ Fixture harness: 83/83 (a third phase runs the fixture under the production Esri
 
 Fixture harness: 96/96 (Phase D exercises `run-crawl`, stored HTML, the report filter and the
 `screenshots` catch-up command).
+
+### 9.9 Operability (2026-09-17)
+
+- Ctrl-C during any crawl phase finishes in-flight pages and exits cleanly; `run-crawl` now stops
+  after an interrupted phase instead of continuing to the next one (it previously did).
+- Rejections (403 / 429 / 401 / 5xx / network errors) are retried, never marked skipped. A rolling
+  window (`http.block_window` 25, `http.block_threshold` 8) trips a circuit breaker that stops the
+  run loudly with everything unfinished left pending; `run-crawl` halts; `meta.blocked_at` is set
+  and `status` shows it. Verified in the harness with a simulated WAF (Phase E).
+- Progress lines include the HTTP status mix of recent requests, pages-with-maps, and the
+  application count; a `NEW application` line is printed on first sighting; `status` gives a
+  read-only snapshot from a second terminal. Harness: 104/104.

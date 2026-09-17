@@ -235,6 +235,31 @@ try {
   dbP2.close();
   const plan = runP(['run-crawl', '--plan']);
   check('run-crawl --plan: prints and exits without touching the database', plan.status === 0 && /RUN PLAN/.test(plan.stdout) && !/inventory starting/.test(plan.stdout));
+  const stat = runP(['status']);
+  check('status command: prints queue, HTTP statuses, applications and stored pages', stat.status === 0 && /URLs:/.test(stat.stdout) && /HTTP statuses:\s+200/.test(stat.stdout) && /applications:\s+\d+/.test(stat.stdout) && /pages stored:/.test(stat.stdout));
+  check('run-crawl: NEW application lines printed during the run', (rc.stdout.match(/NEW application /g) || []).length >= 5);
+
+  // ---- Phase E: the host starts rejecting requests mid-run → loud stop, nothing marked clean, resumable
+  console.log('\n=== Phase E: simulated WAF (403 after 12 page fetches) ===');
+  const server2 = spawn('node', ['test/fixture-site/server.js', '8766'], { stdio: 'inherit', env: { ...process.env, FIXTURE_BLOCK_AFTER: 12 } });
+  await sleep(700);
+  try {
+    const wafCfg = fs.readFileSync('test/out/config-prod.yaml', 'utf8').replace(/8765/g, '8766').replace('database: ./test/out/prod.sqlite', 'database: ./test/out/waf.sqlite').replace('retry_backoff_ms: 200', 'retry_backoff_ms: 60000');
+    fs.writeFileSync('test/out/config-waf.yaml', wafCfg);
+    const runW = (args) => spawnSync('node', ['bin/cli.js', '-c', 'test/out/config-waf.yaml', ...args], { encoding: 'utf8' });
+    const rw = runW(['run-crawl', '--no-confirm', '--screenshots', 'none']);
+    const out = rw.stdout + rw.stderr;
+    check('WAF: run-crawl stops loudly when the host starts rejecting requests', rw.status === 0 && /HOST IS REJECTING REQUESTS/.test(out) && /run-crawl STOPPED during inventory/.test(out), out.slice(-400));
+    check('WAF: scan / arcgis / report phases were NOT run after the stop', !/===== scan starting/.test(out));
+    const dbW = new Database('test/out/waf.sqlite', { readonly: true });
+    const ow = (sql) => dbW.prepare(sql).get();
+    check('WAF: rejected pages are NOT marked skipped/done (stay pending for retry)', ow(`SELECT COUNT(*) c FROM urls WHERE skip_reason LIKE 'http_403%'`).c === 0 && ow(`SELECT COUNT(*) c FROM urls WHERE status='pending' AND error LIKE 'HTTP 403%'`).c > 0, JSON.stringify(dbW.prepare('SELECT status, COUNT(*) c FROM urls GROUP BY status').all()));
+    check('WAF: pages fetched before the block kept their findings', ow(`SELECT COUNT(*) c FROM findings`).c > 0 && ow(`SELECT COUNT(*) c FROM pages`).c > 0);
+    check('WAF: blocked_at recorded for status', !!ow(`SELECT value FROM meta WHERE key='blocked_at'`));
+    dbW.close();
+    const sw = runW(['status']);
+    check('WAF: status shows BLOCKED and the 403 count', /BLOCKED:/.test(sw.stdout) && /403×\d+/.test(sw.stdout));
+  } finally { server2.kill(); }
 } finally { server.kill(); }
 
 console.log(`\n${results.length - failures}/${results.length} checks passed${failures ? `, ${failures} FAILED` : ''}`);

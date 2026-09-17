@@ -44,6 +44,9 @@ http:
   retry_backoff_ms: 15000            # exponential: 15s, 30s, 60s
   respect_robots: true
   max_html_bytes: 5000000
+  stop_on_block: true               # circuit breaker: stop the run (pages stay pending) when the host starts rejecting us
+  block_window: 25                  # ... judged over the last N page fetches / navigations
+  block_threshold: 8                # ... when at least this many of them were 403 / 429 / 401 / 5xx / network errors
 
 scan:
   concurrency: 3                     # browser contexts / workers (3-5 recommended)

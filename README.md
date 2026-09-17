@@ -43,6 +43,25 @@ application. It prompts once, prints phase timings, and is resumable: Ctrl-C and
 `run-crawl` to continue. Use `--max-runtime <minutes>` to bound the scan phase and
 `--screenshots none` to skip images (capture them later with `node bin/cli.js screenshots`).
 
+### What you see while it runs, and how to stop it
+
+- **Progress**: a line every 25 pages during discovery and every 10 during scanning, with pages
+  scanned, pages with maps, applications found so far, failures, and the HTTP status mix of the
+  last 25 requests. A `NEW application …` line the first time each application is seen. Warnings
+  for every retry. Findings are committed per page, so `node bin/cli.js status` in a second
+  terminal (read-only) always shows the live picture, and `report` can be run mid-crawl for a
+  partial export.
+- **Stopping**: Ctrl-C once stops claiming new pages, lets the pages in flight finish (up to ~30 s),
+  and exits with nothing left `in_progress`. Ctrl-C twice exits immediately. Re-run `run-crawl`
+  to resume; `--max-runtime <minutes>` stops it for you.
+- **If the host starts rejecting requests**: 403 / 429 / 401 / 5xx and network errors are never
+  treated as a property of the page — the page is scheduled for retry, not marked skipped. If at
+  least `http.block_threshold` (8) of the last `http.block_window` (25) page requests were
+  rejections, the run prints a loud STOP banner and exits, leaving everything unfinished as
+  `pending`, and `run-crawl` does not continue to later phases. `status` shows `BLOCKED` with the
+  status mix. Sort it out with the web team, then re-run `run-crawl` to resume. This exists so a
+  firewall reacting mid-run cannot produce a falsely clean inventory.
+
 ## Individual commands
 
 ```
@@ -52,6 +71,7 @@ node bin/cli.js scan        # Phase 2: tier-1 static + tier-2 headless detection
 node bin/cli.js arcgis      # ArcGIS Online org cross-reference (public item search)
 node bin/cli.js report      # Phase 3: aggregate, deduplicate, export (no recrawl)
 node bin/cli.js screenshots # capture an image for every application still without one (one visit each)
+node bin/cli.js status      # read-only snapshot: queue, HTTP statuses, applications, failures, BLOCKED flag
 ```
 
 Global options: `-c config.yaml`, `-r rules.yaml`, `-d inventory.sqlite`. `--help` on any command.

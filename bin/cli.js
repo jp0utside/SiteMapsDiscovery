@@ -46,6 +46,9 @@ program.command('run-crawl').description('The whole audit with the settled confi
   .option('--screenshots <mode>', 'none | identity | all')
   .action(run(async (o) => (await import('../src/commands/run-crawl.js')).runCrawl(o)));
 
+program.command('status').description('Read-only snapshot of the run: queue, HTTP statuses, applications found, failures (safe while the crawl runs)')
+  .action(run(async (o) => (await import('../src/commands/status.js')).status(o)));
+
 program.command('screenshots').description('Capture a screenshot for every application that has none (one page visit per application)')
   .action(run(async (o) => (await import('../src/commands/screenshots.js')).screenshots(o)));
 

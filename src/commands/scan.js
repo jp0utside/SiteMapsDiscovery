@@ -15,6 +15,7 @@ import { hostOf } from '../lib/url.js';
 import { log, fmtDuration } from '../lib/log.js';
 import { applyDetectionPolicy, isHit } from '../lib/detection.js';
 import { applyCrawlDelay } from '../lib/robots.js';
+import { HealthMonitor, isBlockStatus } from '../lib/health.js';
 
 /**
  * Phase 2 — scan: tier 1 (static fetch, every URL) + tier 2 (headless render of hits, map-adjacent URLs and a random sample).
@@ -90,6 +91,10 @@ export async function scan(opts) {
   applyCrawlDelay(robots, hostOf(cfg.seeds.homepage), [http.limiter, navLimiter], cfg, log);
   log.info(`detection: vendors ${rules.vendorAllowlist.length ? rules.vendorAllowlist.join(',') : 'ALL'}; links ${cfg.detection.record_links === false ? 'dropped' : 'recorded (flagged)'}; links trigger render: ${cfg.detection.links_trigger_render !== false}`);
 
+  const health = new HealthMonitor({ window: cfg.http.block_window, threshold: cfg.http.block_threshold });
+  let blocked = false;
+  const checkBlocked = (phase) => { if (blocked || cfg.http.stop_on_block === false || !health.isBlocked()) return; blocked = true; stopping = true; setMeta(db, 'blocked_at', JSON.stringify({ at: now(), phase, summary: health.summary() })); log.loud(`HOST IS REJECTING REQUESTS (${health.summary()}). Stopping the scan so the inventory is not falsely clean. Unfinished pages stay pending; investigate (WAF? rate limit?) then re-run to resume.`); };
+  const logNew = (url, newApps) => { for (const f of newApps) log.info(`NEW application ${f.identity_key} [${f.vendor}/${f.type}/${f.placement}] on ${url}`); };
   const t0 = Date.now(); const deadline = cfg.scan.max_runtime_minutes ? t0 + cfg.scan.max_runtime_minutes * 60000 : Infinity;
   let completed = 0, hits = 0, rendered = 0, failed = 0, skipped = 0;
   let stopping = false; const inFlight = new Set();
@@ -102,7 +107,9 @@ export async function scan(opts) {
   const total = totalStmt.get().c;
   const progress = () => {
     const el = Date.now() - t0; const rate = completed ? el / completed : 0; const rem = Math.max(0, remainingStmt.get().c);
-    log.info(`progress: ${completed}/${total} done | hits ${hits} (${completed ? (100 * hits / completed).toFixed(1) : 0}%) | rendered ${rendered} | failed ${failed} skipped ${skipped} | elapsed ${fmtDuration(el)} | ETA ${fmtDuration(rem * rate)}`);
+    const apps = db.prepare('SELECT COUNT(*) c FROM applications').get().c;
+    const hitPages = db.prepare('SELECT COUNT(*) c FROM urls WHERE tier1_hit=1 OR tier2_hit=1').get().c, scanned = db.prepare(`SELECT COUNT(*) c FROM urls WHERE tier1_done=1 AND status<>'skipped'`).get().c;
+    log.info(`progress: ${completed}/${total} this run, ${rem} remaining | pages with maps ${hitPages}/${scanned} (${scanned ? (100 * hitPages / scanned).toFixed(1) : 0}%) | rendered ${rendered} | ${apps} applications | failed ${failed} skipped ${skipped} | http ${health.summary()} | elapsed ${fmtDuration(el)} | ETA ${fmtDuration(rem * rate)}`);
   };
 
   async function processRow(row, workerId) {
@@ -110,9 +117,12 @@ export async function scan(opts) {
     if (only) { /* forced re-scan */ }
     // ---- Tier 1
     if (tiers.includes(1) && !row.tier1_done) {
-      const res = await http.getText(url);
+      let res;
+      try { res = await http.getText(url); } catch (e) { health.record(null); throw e; }
+      health.record(res.status);
       const finalNorm = scope.normalize(res.finalUrl)?.toString() || res.finalUrl;
       upd.fetch.run(res.status, res.finalUrl, null, url);
+      if (isBlockStatus(res.status)) throw new Error(`HTTP ${res.status} (block/outage — retrying, not skipping)`);
       if (res.status >= 400) { upd.skip.run(`http_${res.status}`, url); skipped++; return 'skipped'; }
       if (!isHtml(res.contentType)) { upd.skip.run('non_html', url); skipped++; return 'skipped'; }
       if (!scope.isCrawlableHost(new URL(res.finalUrl).host)) { upd.skip.run('redirected_off_host', url); skipped++; return 'skipped'; }
@@ -125,7 +135,7 @@ export async function scan(opts) {
       const adjacent = rules.isMapAdjacent(new URL(url).pathname) || rules.isMapAdjacent(title);
       reason = tier1Hit ? 'hit' : adjacent ? 'pattern' : inSample(url, cfg.scan.tier2_sample_rate) ? 'sample' : 'none';
       if (only) reason = reason === 'none' ? 'manual' : reason;
-      store.store(url, 1, det.findings, null);
+      logNew(url, store.store(url, 1, det.findings, null));
       upd.tier1.run(tier1Hit, reason, url);
       if (tier1Hit) hits++;
     }
@@ -136,10 +146,12 @@ export async function scan(opts) {
       await navLimiter.wait(hostOf(url));
       const ctx = await pool.context(workerId, { cookies: consentCookies });
       const r = await renderPage(ctx, url, { cfg, rules, consent, priorStrong: store.strongKeysForUrl(url), isNewIdentity: (k) => store.needsScreenshot(k), screenshot: (page, key, sel, bbox) => shots.shouldCapture(key, store.needsScreenshot(key)) ? shots.capture(page, key, sel, bbox) : null });
-      if (r.error && !r.dom) throw new Error(`render: ${r.error}`);
+      if (r.error && !r.dom) { health.record(null); throw new Error(`render: ${r.error}`); }
+      health.record(r.httpStatus);
+      if (isBlockStatus(r.httpStatus)) throw new Error(`HTTP ${r.httpStatus} on render (block/outage — retrying, not skipping)`);
       r.findings = applyDetectionPolicy(r.findings, cfg);
       const t2hit = r.findings.some(f => f.placement !== 'site_chrome' && f.type !== 'map_link_only') ? 1 : 0;
-      store.store(url, 2, r.findings, r.requests);
+      logNew(url, store.store(url, 2, r.findings, r.requests));
       if (r.title && !title) db.prepare('UPDATE urls SET title=COALESCE(title, ?) WHERE url=?').run(r.title, url);
       upd.tier2.run(t2hit, url);
       rendered++;
@@ -170,6 +182,7 @@ export async function scan(opts) {
         if (/Target page, context or browser has been closed|browser has disconnected/i.test(msg)) await pool.closeContext(workerId);
       } finally { inFlight.delete(row.url); }
       completed++;
+      checkBlocked('scan');
       if (completed % 10 === 0) progress();
     }
   }
@@ -178,14 +191,17 @@ export async function scan(opts) {
   await Promise.all(Array.from({ length: n }, (_, i) => worker(i)));
   progress();
   if (Date.now() >= deadline) log.warn(`max_runtime_minutes (${cfg.scan.max_runtime_minutes}) reached; stopping. Re-run scan to resume.`);
-  if (stopping) log.warn('interrupted; re-run scan to resume where it left off.');
+  if (stopping && !blocked) log.warn('interrupted; re-run scan to resume where it left off.');
+  if (blocked) log.loud(`scan STOPPED because the host is rejecting requests (${health.summary()}). ${remainingStmt.get().c} URLs remain pending.`);
+  log.info(`http totals this run: ${health.totals() || 'none'}`);
   process.off('SIGINT', onSig); process.off('SIGTERM', onSig);
   await pool.close(); await http.close();
   store.refreshCounts();
-  const summary = { completed, hits, rendered, failed, skipped, interrupted: stopping, elapsed_ms: Date.now() - t0, tiers, consent: consent.enabled };
+  const summary = { completed, hits, rendered, failed, skipped, interrupted: stopping && !blocked, blocked, elapsed_ms: Date.now() - t0, tiers, consent: consent.enabled };
   finishRun(db, runId, summary);
   const byStatus = db.prepare('SELECT status, COUNT(*) c FROM urls GROUP BY status').all();
   log.info('scan summary:', JSON.stringify(summary));
   log.info('queue by status:', byStatus.map(r => `${r.status}=${r.c}`).join(' '));
   db.close();
+  return summary;
 }

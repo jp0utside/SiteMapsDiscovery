@@ -39,18 +39,27 @@ export async function runCrawl(opts) {
   console.log('\n================ RUN PLAN ================\n' + plan.join('\n') + '\n==========================================');
   const notice = `Heads-up: automated inventory crawl of ${host} starting ${new Date().toISOString()}. About ${cfg.http.requests_per_second_per_host} page requests per second (plus browser-like asset loads for rendered pages), ${cfg.scan.concurrency} pages in flight, expected to run roughly 4-5 hours. User-Agent "${cfg.http.user_agent}". Read-only GET requests to public pages; robots.txt Disallow rules respected.`;
   console.log('\nText for the web team:\n' + notice + '\n');
+  console.log('While it runs: a progress line every 10 pages (every 25 during discovery), a line for each newly found application, warnings for retries, and a loud STOP if the host starts rejecting requests. Ctrl-C once = finish in-flight pages and exit cleanly; re-run run-crawl to resume. In another terminal: node bin/cli.js status\n');
   if (opts.plan) return;
   if (/<FILL IN>/.test(cfg.http.user_agent)) throw new Error('config.yaml → http.user_agent still contains <FILL IN>; set a real contact before crawling.');
   if (opts.confirm === false) { /* --no-confirm: proceed */ } else if (!process.stdin.isTTY) { log.info('non-interactive; proceeding'); } else {
     process.stdout.write('Proceed with the crawl? [y/N] ');
     const ans = await new Promise(r => { process.stdin.once('data', d => r(String(d).trim().toLowerCase())); });
+    process.stdin.pause();
     if (ans !== 'y' && ans !== 'yes') { console.log('aborted'); return; }
   }
   const db = openDb(cfg.database); const phases = { inventory: 0, scan: 0, arcgis: 0, report: 0 }; db.close();
-  const phase = async (name, fn) => { const t = Date.now(); log.info(`===== ${name} starting =====`); await fn(); phases[name] = Date.now() - t; log.info(`===== ${name} done in ${fmtDuration(phases[name])} =====`); };
+  const phase = async (name, fn) => { const t = Date.now(); log.info(`===== ${name} starting =====`); const r = await fn(); phases[name] = Date.now() - t; log.info(`===== ${name} done in ${fmtDuration(phases[name])} =====`); return r || {}; };
   const sub = { ...opts, plan: undefined, confirm: undefined };
-  await phase('inventory', async () => (await import('./inventory.js')).inventory(sub));
-  await phase('scan', async () => (await import('./scan.js')).scan({ ...sub, tier: undefined }));
+  const halt = (r, name) => {
+    if (r.blocked) { console.log(`\nrun-crawl STOPPED during ${name}: the host is rejecting requests. Nothing was marked clean; unfinished pages stay pending. Check with the web team (WAF / rate limit), then re-run run-crawl to resume.`); return true; }
+    if (r.interrupted) { console.log(`\nrun-crawl interrupted during ${name}. Progress is saved; re-run run-crawl to resume.`); return true; }
+    return false;
+  };
+  const inv = await phase('inventory', async () => (await import('./inventory.js')).inventory(sub));
+  if (halt(inv, 'inventory')) return;
+  const sc = await phase('scan', async () => (await import('./scan.js')).scan({ ...sub, tier: undefined }));
+  if (halt(sc, 'scan')) return;
   const pending = (() => { const d = openDb(cfg.database); const c = d.prepare(`SELECT COUNT(*) c FROM urls WHERE status IN ('pending','in_progress')`).get().c; d.close(); return c; })();
   if (pending) log.warn(`${pending} URLs still pending (interrupted or max_runtime reached). Re-run run-crawl to resume; the report below reflects partial coverage.`);
   await phase('arcgis', async () => { try { await (await import('./arcgis.js')).arcgis(sub); } catch (e) { log.error(`arcgis cross-reference failed: ${e.message.split('\n')[0]} — continuing; re-run \`arcgis\` later`); } });
