@@ -120,6 +120,7 @@ export async function scan(opts) {
       const det = detectStatic(res.text, url, rules);
       det.findings = applyDetectionPolicy(det.findings, cfg);
       title = det.title; db.prepare('UPDATE urls SET title=? WHERE url=?').run(title || null, url);
+      store.storePage(url, res, det.findings.length > 0, cfg.inventory.store_html || 'all');
       tier1Hit = isHit(det.findings, cfg) ? 1 : 0;
       const adjacent = rules.isMapAdjacent(new URL(url).pathname) || rules.isMapAdjacent(title);
       reason = tier1Hit ? 'hit' : adjacent ? 'pattern' : inSample(url, cfg.scan.tier2_sample_rate) ? 'sample' : 'none';

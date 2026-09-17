@@ -95,6 +95,7 @@ export async function inventory(opts) {
       const det = detectStatic(res.text, url, cfg.rules);
       det.findings = applyDetectionPolicy(det.findings, cfg);
       db.prepare('UPDATE urls SET title=? WHERE url=?').run(det.title || null, url);
+      store.storePage(url, res, det.findings.length > 0, cfg.inventory.store_html || 'all');
       const tx = db.transaction(() => {
         for (const l of det.links) add(l, res.finalUrl, 'crawl');
         if (finalNorm !== url) add(finalNorm, undefined, 'crawl');

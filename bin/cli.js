@@ -38,6 +38,17 @@ program.command('scan').description('Phase 2: tier-1 static + tier-2 headless de
 program.command('arcgis').description('ArcGIS Online org cross-reference (public item search)')
   .action(run(async (o) => (await import('../src/commands/arcgis.js')).arcgis(o)));
 
+program.command('run-crawl').description('The whole audit with the settled configuration: inventory → scan → arcgis → report (resumable: re-run to continue)')
+  .option('--plan', 'print the run plan and the web-team notice, then exit without crawling')
+  .option('--no-confirm', 'do not prompt before starting')
+  .option('--concurrency <n>', 'browser contexts / workers')
+  .option('--max-runtime <minutes>', 'bound the scan phase; re-run to resume')
+  .option('--screenshots <mode>', 'none | identity | all')
+  .action(run(async (o) => (await import('../src/commands/run-crawl.js')).runCrawl(o)));
+
+program.command('screenshots').description('Capture a screenshot for every application that has none (one page visit per application)')
+  .action(run(async (o) => (await import('../src/commands/screenshots.js')).screenshots(o)));
+
 program.command('report').description('Phase 3: aggregate, deduplicate, export CSV / JSONL / HTML from SQLite (no recrawl)')
   .option('--out <dir>', 'output directory')
   .option('--no-probe-keys', 'do not probe API keys for referrer restriction')

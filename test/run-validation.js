@@ -198,6 +198,43 @@ try {
   const htmlE = fs.readFileSync('test/out/esri/report.html', 'utf8');
   check('esri-only: report has Linked-only and Enterprise sections and states the scope', /Linked only/.test(htmlE) && /ArcGIS Enterprise \/ Geocortex viewers/.test(htmlE) && /vendors <b>esri, esri-enterprise<\/b> only/.test(htmlE));
   dbE.close();
+
+  // ---- Phase D: production-shaped run-crawl (detection: all vendors, report: esri only, HTML stored, screenshots off → catch-up)
+  console.log('\n=== Phase D: run-crawl (broad detection, Esri-only report, stored HTML, screenshots catch-up) ===');
+  const prodCfg = fs.readFileSync('test/config.test.yaml', 'utf8')
+    .replace('detection: { vendors: [], record_links: true, links_trigger_render: true }', 'detection: { vendors: [], record_links: true, links_trigger_render: false }')
+    .replace('database: ./test/out/test.sqlite', 'database: ./test/out/prod.sqlite').replace('dir: ./test/out/screenshots', 'dir: ./test/out/screenshots-prod')
+    .replace('report: { dir: ./test/out,', 'report: { vendors: [esri, esri-enterprise], dir: ./test/out/prod,');
+  fs.writeFileSync('test/out/config-prod.yaml', prodCfg);
+  const runP = (args) => spawnSync('node', ['bin/cli.js', '-c', 'test/out/config-prod.yaml', ...args], { encoding: 'utf8' });
+  const rc = runP(['run-crawl', '--no-confirm', '--screenshots', 'none']);
+  check('run-crawl: exits 0 and prints the plan, the web-team notice and phase timings', rc.status === 0 && /RUN PLAN/.test(rc.stdout) && /Text for the web team/.test(rc.stdout) && /run-crawl finished/.test(rc.stdout), rc.status !== 0 ? (rc.stdout + rc.stderr).slice(-600) : '');
+  const dbP = new Database('test/out/prod.sqlite', { readonly: true });
+  const op = (sql, ...p) => dbP.prepare(sql).get(...p);
+  const zlib = await import('node:zlib');
+  const pg = op(`SELECT url, html_gz, size_bytes FROM pages WHERE url=?`, u('/tsd/san-mateo-county-digital-equity-portal'));
+  check('run-crawl: page HTML stored gzipped and round-trips', !!pg && zlib.gunzipSync(pg.html_gz).toString().includes('webappviewer') && pg.size_bytes > 500, pg ? `${pg.size_bytes}B → ${pg.html_gz.length}B` : 'no row');
+  check('run-crawl: HTML stored for every crawled HTML page', op(`SELECT COUNT(*) c FROM pages`).c === op(`SELECT COUNT(*) c FROM urls WHERE tier1_done=1 AND status='done'`).c, `${op(`SELECT COUNT(*) c FROM pages`).c} vs ${op(`SELECT COUNT(*) c FROM urls WHERE tier1_done=1 AND status='done'`).c}`);
+  check('run-crawl: database holds non-Esri findings (broad detection)', op(`SELECT COUNT(*) c FROM findings WHERE vendor IN ('google','leaflet','tableau','mapbox')`).c > 0);
+  check('run-crawl: every URL finished', op(`SELECT COUNT(*) c FROM urls WHERE status IN ('pending','in_progress','failed')`).c === 0);
+  const appsP = fs.readFileSync('test/out/prod/applications.csv', 'utf8').split('\n').slice(1).filter(Boolean);
+  check('run-crawl: applications.csv shows Esri vendors only', appsP.length > 0 && appsP.every(l => /^[^,]+,(esri|esri-enterprise),/.test(l)), appsP.map(l => l.split(',')[1]).join(','));
+  const occP = fs.readFileSync('test/out/prod/occurrences.csv', 'utf8');
+  const occVendors = new Set(occP.split('\n').slice(1).filter(Boolean).map(l => l.split(',').find((c, i, arr) => arr[i - 1] && /^(arcgis:|iframe:|inpage:|gmymaps:|mapbox:|link:)/.test(arr[i - 1]))));
+  check('run-crawl: occurrences.csv filtered to Esri', occP.split('\n').length > 2 && [...occVendors].every(v => ['esri', 'esri-enterprise'].includes(v)), [...occVendors].join(','));
+  check('run-crawl: findings-all-vendors.jsonl keeps the broad data', fs.existsSync('test/out/prod/findings-all-vendors.jsonl') && /"vendor":"google"/.test(fs.readFileSync('test/out/prod/findings-all-vendors.jsonl', 'utf8')));
+  const htmlP = fs.readFileSync('test/out/prod/report.html', 'utf8');
+  check('run-crawl: report states detection vs report scope and stored-HTML coverage', /Report scope[^<]*vendors <b>esri, esri-enterprise<\/b> only — \d+ of \d+ recorded applications/.test(htmlP) && /pages' HTML stored/.test(htmlP));
+  check('run-crawl --screenshots none: no images captured', op(`SELECT COUNT(*) c FROM applications WHERE screenshot_path IS NOT NULL`).c === 0);
+  dbP.close();
+  const sc = runP(['screenshots']);
+  const dbP2 = new Database('test/out/prod.sqlite', { readonly: true });
+  const withShot = dbP2.prepare(`SELECT identity_key, screenshot_path FROM applications WHERE screenshot_path IS NOT NULL`).all();
+  check('screenshots command: fills in images for embedded applications afterwards', sc.status === 0 && withShot.length >= 3 && withShot.every(a => fs.existsSync(a.screenshot_path)), `${withShot.length} captured`);
+  check('screenshots command: skips link-only / site-chrome-only apps', !withShot.some(a => /c7075a28|Html5Viewer|aaaa1111/.test(a.identity_key)));
+  dbP2.close();
+  const plan = runP(['run-crawl', '--plan']);
+  check('run-crawl --plan: prints and exits without touching the database', plan.status === 0 && /RUN PLAN/.test(plan.stdout) && !/inventory starting/.test(plan.stdout));
 } finally { server.kill(); }
 
 console.log(`\n${results.length - failures}/${results.length} checks passed${failures ? `, ${failures} FAILED` : ''}`);

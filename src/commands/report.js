@@ -19,7 +19,7 @@ export async function report(opts) {
   new Store(db).refreshCounts();
 
   // ---- Applications (one row per identity) with placement breakdown.
-  const apps = db.prepare(`
+  let apps = db.prepare(`
     SELECT a.*, 
       (SELECT COUNT(DISTINCT url) FROM findings f WHERE f.identity_key=a.identity_key AND f.placement='main_content') AS main_content_pages,
       (SELECT COUNT(*) FROM urls u, json_each(u.chrome_keys) j WHERE u.chrome_keys IS NOT NULL AND j.value=a.identity_key) AS site_chrome_pages,
@@ -31,6 +31,9 @@ export async function report(opts) {
       (SELECT group_concat(DISTINCT arcgis_org) FROM findings f WHERE f.identity_key=a.identity_key AND arcgis_org IS NOT NULL) AS arcgis_orgs
     FROM applications a ORDER BY a.occurrence_count DESC, a.identity_key`).all();
   const kindStmt = db.prepare(`SELECT rule, signal_type FROM findings WHERE identity_key=? ORDER BY CASE signal_type WHEN 'iframe' THEN 0 WHEN 'frame' THEN 1 WHEN 'image' THEN 2 WHEN 'link' THEN 3 WHEN 'network' THEN 4 ELSE 5 END, id LIMIT 1`);
+  const reportVendors = new Set((cfg.report.vendors || []).map(v => String(v).toLowerCase()));
+  const inReport = (vendor) => reportVendors.size === 0 || reportVendors.has(String(vendor || '').toLowerCase());
+  const appsAll = apps.length; apps = apps.filter(a => inReport(a.vendor));
   for (const a of apps) {
     const k = kindStmt.get(a.identity_key) || {};
     a.app_kind = appKind(k.rule, k.signal_type, a);
@@ -53,14 +56,15 @@ export async function report(opts) {
       MIN(f.container_selector) AS container_selector, MIN(f.target_url) AS target_url, MAX(f.tier) AS max_tier
     FROM findings f JOIN applications a ON a.identity_key=f.identity_key LEFT JOIN urls u ON u.url=f.url
     WHERE f.placement='main_content'
-    GROUP BY f.url, f.identity_key ORDER BY f.identity_key, f.url`).all();
+    GROUP BY f.url, f.identity_key ORDER BY f.identity_key, f.url`).all().filter(o => inReport(o.vendor));
   for (const o of occ) { o.confidence = o.conf_rank === 3 ? 'high' : o.conf_rank === 2 ? 'medium' : 'low'; const st = o.signal_types.split(','); o.how = st.every(s => s === 'link') ? 'link' : (st.includes('iframe') || st.includes('frame')) ? 'iframe_embed' : st.includes('image') ? 'static_image' : 'in_page'; }
   fs.writeFileSync(path.join(outDir, 'occurrences.csv'), csv(occ, ['page_url', 'page_title', 'identity_key', 'vendor', 'application_type', 'placement', 'how', 'signal_types', 'finding_types', 'confidence', 'container_selector', 'target_url', 'max_tier']));
 
   // ---- Findings JSONL (raw grain, every signal).
   const fj = fs.createWriteStream(path.join(outDir, 'findings.jsonl'));
-  for (const f of db.prepare('SELECT * FROM findings ORDER BY id').iterate()) fj.write(JSON.stringify(f) + '\n');
-  await new Promise(r => fj.end(r));
+  const fa = reportVendors.size ? fs.createWriteStream(path.join(outDir, 'findings-all-vendors.jsonl')) : null;
+  for (const f of db.prepare('SELECT * FROM findings ORDER BY id').iterate()) { const line = JSON.stringify(f) + '\n'; if (inReport(f.vendor)) fj.write(line); if (fa) fa.write(line); }
+  await new Promise(r => fj.end(r)); if (fa) await new Promise(r => fa.end(r));
 
   // ---- Coverage.
   const cnt = (sql, ...p) => db.prepare(sql).get(...p).c;
@@ -111,7 +115,7 @@ export async function report(opts) {
   };
 
   // ---- API keys / tokens: publishable client-side identifiers; probe for referrer restriction (single GET, no state change).
-  const keys = db.prepare(`SELECT api_key, vendor, COUNT(DISTINCT url) pages, MIN(target_url) example, group_concat(DISTINCT identity_key) identities FROM findings WHERE api_key IS NOT NULL GROUP BY api_key, vendor`).all();
+  const keys = db.prepare(`SELECT api_key, vendor, COUNT(DISTINCT url) pages, MIN(target_url) example, group_concat(DISTINCT identity_key) identities FROM findings WHERE api_key IS NOT NULL GROUP BY api_key, vendor`).all().filter(k => inReport(k.vendor));
   if (cfg.report.probe_api_keys && !opts.noProbeKeys && keys.length) {
     const http = new HttpClient(cfg.http);
     for (const k of keys) k.restriction = await probeKey(http, k);
@@ -122,9 +126,11 @@ export async function report(opts) {
     applications: apps.length, applications_unflagged: apps.filter(a => !a.flagged).length,
     site_wide: apps.filter(a => a.placement_summary === 'site-wide navigation').length,
     occurrences: occ.length, findings: cnt('SELECT COUNT(*) c FROM findings'),
-    by_vendor: db.prepare('SELECT vendor, COUNT(*) c FROM applications GROUP BY vendor ORDER BY c DESC').all(),
-    by_type: db.prepare('SELECT type, COUNT(*) c FROM applications GROUP BY type ORDER BY c DESC').all(),
-    pages_with_maps: cnt(`SELECT COUNT(DISTINCT url) c FROM findings WHERE placement='main_content' AND type<>'map_link_only'`),
+    by_vendor: db.prepare('SELECT vendor, COUNT(*) c FROM applications GROUP BY vendor ORDER BY c DESC').all().filter(r => inReport(r.vendor)),
+    by_type: Object.entries(apps.reduce((m, a) => (m[a.type] = (m[a.type] || 0) + 1, m), {})).map(([type, c]) => ({ type, c })).sort((x, y) => y.c - x.c),
+    applications_all_vendors: appsAll, report_vendors: [...reportVendors],
+    pages_stored: cnt('SELECT COUNT(*) c FROM pages'), pages_stored_bytes: (db.prepare('SELECT COALESCE(SUM(LENGTH(html_gz)),0) b FROM pages').get().b),
+    pages_with_maps: reportVendors.size ? new Set(occ.filter(o => o.how !== 'link').map(o => o.page_url)).size : cnt(`SELECT COUNT(DISTINCT url) c FROM findings WHERE placement='main_content' AND type<>'map_link_only'`),
   };
   const runs = db.prepare('SELECT * FROM runs ORDER BY id').all();
   const html = renderHtml({ cfg, apps, occ, coverage, arcgis, keys, totals, runs, generatedAt: new Date().toISOString(), toolVersion: TOOL_VERSION });

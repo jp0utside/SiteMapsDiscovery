@@ -1,5 +1,6 @@
 import { now } from './db.js';
 import { isPerPageIdentity, sha1 } from './identity.js';
+import zlib from 'node:zlib';
 
 const TYPE_RANK = { gis_application: 7, story_map: 6, interactive_webmap: 5, embedded_third_party: 4, thematic_chart_map: 4, static_map_image: 3, non_geographic: 2, map_link_only: 1 };
 export const typeRank = (t) => TYPE_RANK[t] || 0;
@@ -56,6 +57,14 @@ export class Store {
         else this.stmts.updApp.run(typeRank(f.type) > typeRank(app.type) ? f.type : app.type, f.title || null, f.screenshot_path || null, f.target_url || null, f.identity_key);
       }
     });
+  }
+  /** Keep the fetched HTML (gzipped) so rules can be re-run offline. mode: all | hits | none */
+  storePage(url, res, hasFindings, mode) {
+    if (mode === 'none' || (mode === 'hits' && !hasFindings)) return;
+    const gz = zlib.gzipSync(res.body, { level: 6 });
+    this.db.prepare(`INSERT INTO pages(url, fetched_at, http_status, content_type, final_url, size_bytes, html_gz) VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(url) DO UPDATE SET fetched_at=excluded.fetched_at, http_status=excluded.http_status, content_type=excluded.content_type, final_url=excluded.final_url, size_bytes=excluded.size_bytes, html_gz=excluded.html_gz`)
+      .run(url, now(), res.status, res.contentType, res.finalUrl, res.body.length, gz);
   }
   isNewIdentity(key) { return !this.stmts.getApp.get(key); }
   needsScreenshot(key) { const a = this.stmts.getApp.get(key); return !a || !a.screenshot_path; }
