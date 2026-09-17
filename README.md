@@ -28,7 +28,41 @@ Before a full-site run: **notify the security / network team.** A full crawl loo
 reconnaissance; a WAF that starts returning 403 mid-run yields a falsely *clean* inventory rather
 than an obvious failure. Edit the `contact:` in `config.yaml` → `http.user_agent` first.
 
-## Commands
+## The one command
+
+```bash
+node bin/cli.js run-crawl --plan     # print the run plan + the notice to send the web team; touches nothing
+node bin/cli.js run-crawl            # inventory → scan → arcgis → report with the settled config.yaml
+```
+
+`run-crawl` is the whole audit with every decision pre-configured in `config.yaml`: 2 page
+requests/s on www.smcgov.org with 3 pages in flight, robots.txt `Disallow` honoured and
+`Crawl-delay` overridden with the web team's approval, every vendor recorded but the report
+filtered to Esri, each page's HTML stored gzipped for offline re-analysis, one screenshot per
+application. It prompts once, prints phase timings, and is resumable: Ctrl-C and re-run
+`run-crawl` to continue. Use `--max-runtime <minutes>` to bound the scan phase and
+`--screenshots none` to skip images (capture them later with `node bin/cli.js screenshots`).
+
+### What you see while it runs, and how to stop it
+
+- **Progress**: a line every 25 pages during discovery and every 10 during scanning, with pages
+  scanned, pages with maps, applications found so far, failures, and the HTTP status mix of the
+  last 25 requests. A `NEW application …` line the first time each application is seen. Warnings
+  for every retry. Findings are committed per page, so `node bin/cli.js status` in a second
+  terminal (read-only) always shows the live picture, and `report` can be run mid-crawl for a
+  partial export.
+- **Stopping**: Ctrl-C once stops claiming new pages, lets the pages in flight finish (up to ~30 s),
+  and exits with nothing left `in_progress`. Ctrl-C twice exits immediately. Re-run `run-crawl`
+  to resume; `--max-runtime <minutes>` stops it for you.
+- **If the host starts rejecting requests**: 403 / 429 / 401 / 5xx and network errors are never
+  treated as a property of the page — the page is scheduled for retry, not marked skipped. If at
+  least `http.block_threshold` (8) of the last `http.block_window` (25) page requests were
+  rejections, the run prints a loud STOP banner and exits, leaving everything unfinished as
+  `pending`, and `run-crawl` does not continue to later phases. `status` shows `BLOCKED` with the
+  status mix. Sort it out with the web team, then re-run `run-crawl` to resume. This exists so a
+  firewall reacting mid-run cannot produce a falsely clean inventory.
+
+## Individual commands
 
 ```
 node bin/cli.js preflight   # Phase 0: consent-gating probe (differential render of ~30 pages)
@@ -36,6 +70,8 @@ node bin/cli.js inventory   # Phase 1: discover URLs (sitemaps → robots.txt �
 node bin/cli.js scan        # Phase 2: tier-1 static + tier-2 headless detection; resumable
 node bin/cli.js arcgis      # ArcGIS Online org cross-reference (public item search)
 node bin/cli.js report      # Phase 3: aggregate, deduplicate, export (no recrawl)
+node bin/cli.js screenshots # capture an image for every application still without one (one visit each)
+node bin/cli.js status      # read-only snapshot: queue, HTTP statuses, applications, failures, BLOCKED flag
 ```
 
 Global options: `-c config.yaml`, `-r rules.yaml`, `-d inventory.sqlite`. `--help` on any command.
@@ -116,24 +152,35 @@ filtered, never dropped.
 clipped to the map container, JPEG q70, written to `./screenshots/<hash>.jpg`; only the path is
 stored. Hard cap 1,000 images (scan continues; a warning is logged).
 
-## Detection scope (what counts as a finding)
+## Three scopes: crawl, detection, report
 
-`rules.yaml` carries rules for every vendor; `config.yaml` → `detection` narrows which are live:
+| Layer | Question it answers | Setting |
+|---|---|---|
+| Crawl | which URLs are fetched | `scope` — www.smcgov.org, every path |
+| Detection | what is written to the database from each page, and which pages get rendered | `detection` |
+| Report | what the CSV / HTML export shows | `report.vendors` |
+
+The crawl is identical whatever the detection scope, so the shipped config records **every**
+vendor (`detection.vendors: []`) and stores each page's HTML gzipped (`inventory.store_html: all`,
+roughly 150–250 MB for the whole site). The deliverable is then filtered to the audit's subject,
+ESRI / ArcGIS Online items, with `report.vendors: [esri, esri-enterprise]`; the database keeps the
+rest, and `findings-all-vendors.jsonl` exports it. Re-run `report` with a different vendor list at
+any time without recrawling.
 
 ```yaml
 detection:
-  vendors: [esri, esri-enterprise]  # allowlist of rule vendors; [] = all vendors
+  vendors: []                       # [] = all vendors; e.g. [esri, esri-enterprise] to store only Esri findings
   record_links: true                # keep <a href> links to map apps as flagged map_link_only findings
   links_trigger_render: false       # a page whose only signal is a link is not a tier-1 hit
+report:
+  vendors: [esri, esri-enterprise]  # esri = ArcGIS Online / JS API; esri-enterprise = ArcGIS Enterprise & Geocortex on county hosts
 ```
 
-The audit's subject is ESRI / ArcGIS Online items embedded in county pages, so the shipped config
-allows `esri` (ArcGIS Online apps, StoryMaps, the JS API) and `esri-enterprise` (ArcGIS Enterprise
-and Geocortex viewers on county hosts such as `gis.smcgov.org`). Google, Mapbox, Leaflet, Tableau
-and the rest stay in `rules.yaml` but produce nothing until added to the allowlist. Links to Esri
-apps are still recorded and flagged (so an org item that pages link to is not mis-reported as
-orphaned) but do not by themselves cause a page to be rendered. Links inside map attribution
-controls ("© OpenStreetMap", "Powered by Esri") are always ignored.
+Links to Esri apps are recorded and flagged (so an org item that pages link to is not
+mis-reported as orphaned) but never cause a page to be rendered on their own. Links inside map
+attribution controls ("© OpenStreetMap", "Powered by Esri") are always ignored. Department
+attribution is deliberately not derived: the URL, title and stored HTML are all in the database
+for that offline step.
 
 ## Crawl scope
 
@@ -156,12 +203,16 @@ URL normalization before queueing: lowercase host, strip fragment, strip trailin
 assets by extension, dedupe. `robots.txt` `Disallow` rules are respected (disallowed URLs are
 recorded as `skipped/robots_disallow`, never fetched). Hard cap 50,000 URLs, logged loudly.
 
-**Crawl-delay.** www.smcgov.org's robots.txt declares `Crawl-delay: 10`. With
-`http.respect_crawl_delay: true` (the default) the tool spaces page fetches and page navigations
-on that host by the declared delay, which makes a full run take roughly 40 hours; a rendered
-page's own CSS/JS/image loads are treated as part of that page. Setting it to `false` runs at
-`http.requests_per_second_per_host` instead (about 4–5 hours) and must have the site owner's
-explicit approval. Either way the choice is announced loudly at startup.
+**Rate and Crawl-delay.** www.smcgov.org's robots.txt declares `Crawl-delay: 10`. The shipped
+config sets `http.respect_crawl_delay: false` because the web team approved the faster rate
+(2026-09-17) on condition of being notified before each crawl; `run-crawl --plan` prints the
+notice to send them. The run then goes at `requests_per_second_per_host: 2` page requests per
+second — the rate validated live with no 403/429 — and about 4–5 hours end to end. Concurrency
+does not multiply that: the limiter is one per-host gate shared by all workers; workers exist
+because a render spends most of its time waiting for the page's JavaScript. Rendered pages also
+load their own CSS/JS/images like a browser, so logs will show short asset bursts. Set
+`respect_crawl_delay: true` to honour the directive instead (roughly 40 hours). Either way the
+choice is announced loudly at startup.
 
 ## Outputs (`output/`)
 
@@ -175,9 +226,13 @@ explicit approval. Either way the choice is announced loudly at startup.
 
 ## Data model (SQLite, `inventory.sqlite`)
 
-`runs`, `urls` (queue + per-URL status, tiers, `chrome_keys`), `findings` (raw grain),
-`requests` (matched network requests per rendered page), `applications` (deduplicated grain),
-`arcgis_items` (org enumeration + individually looked-up external items), `meta`. See `src/lib/db.js`.
+`runs`, `urls` (queue + per-URL status, tiers, `chrome_keys`), `pages` (gzipped HTML of every
+fetched page), `findings` (raw grain), `requests` (matched network requests per rendered page),
+`applications` (deduplicated grain), `arcgis_items` (org enumeration + individually looked-up
+external items), `meta`. See `src/lib/db.js`.
+
+Re-analysing stored HTML offline: `SELECT url, html_gz FROM pages` and `zlib.gunzipSync` — the
+same `detectStatic()` in `src/lib/tier1.js` can be run over it with an edited `rules.yaml`.
 
 ## Extending the rules
 

@@ -99,9 +99,11 @@ const orgItems = [
 ];
 const externalItems = { [DASH]: { id: DASH, title: 'Contractor Dashboard', type: 'Dashboard', owner: 'consultant_jdoe', created: 1690000000000, modified: 1700000000000, orgId: 'OTHERORG', access: 'public' } };
 
+const BLOCK_AFTER = Number(process.env.FIXTURE_BLOCK_AFTER || 0); let pageFetches = 0; // simulate a WAF that starts rejecting after N page fetches
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, BASE);
   const p = u.pathname;
+  if (BLOCK_AFTER && !/^\/(robots\.txt|sitemap\.xml|assets|tiles|sharing)/.test(p)) { pageFetches++; if (pageFetches > BLOCK_AFTER) { res.writeHead(403, { 'content-type': 'text/html' }); return res.end('<h1>403 Forbidden (simulated WAF)</h1>'); } }
   const send = (code, type, body, headers = {}) => { res.writeHead(code, { 'content-type': type, ...headers }); res.end(body); };
   const json = (o) => send(200, 'application/json', JSON.stringify(o));
   if (p === '/robots.txt') return send(200, 'text/plain', `User-agent: *\nDisallow: /private/\nDisallow: /admin\nCrawl-delay: 5\nSitemap: ${BASE}/sitemap.xml\n`);

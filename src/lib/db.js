@@ -95,6 +95,15 @@ CREATE TABLE IF NOT EXISTS arcgis_items(
   access TEXT,
   fetched_at TEXT
 );
+CREATE TABLE IF NOT EXISTS pages(
+  url TEXT PRIMARY KEY,
+  fetched_at TEXT NOT NULL,
+  http_status INTEGER,
+  content_type TEXT,
+  final_url TEXT,
+  size_bytes INTEGER,
+  html_gz BLOB                       -- gzipped raw HTML from the tier-1 fetch; re-analysable offline without recrawling
+);
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
 `;
 

@@ -310,3 +310,42 @@ now configuration (`config.yaml → detection`), so the wider ruleset stays avai
 | Report | applications now carry `app_kind`, `hosting`, `embed_pages`, `linked_only`; report.html adds Linked-only, Enterprise-hosted and in-page JS API groups and states the detection scope |
 
 Fixture harness: 83/83 (a third phase runs the fixture under the production Esri-only scope).
+
+### 9.8 Web-team approval, purpose clarification and run configuration (2026-09-17)
+
+- **Rate (§9.1 resolved).** The web team approved exceeding the robots.txt `Crawl-delay`
+  ("as long as I am not firing like 1000 requests a second") on condition of being told before
+  each crawl. Settled at **2 page requests/s, 3 pages in flight** — the rate validated live with
+  no 403/429, within an order of magnitude of the ~1 req/s courtesy convention used by Wikipedia's
+  bot policy, Common Crawl and the Internet Archive. `http.respect_crawl_delay: false` in
+  config.yaml; startup announces `OVERRIDDEN`.
+- **Purpose.** The GIS team wants to know where AGOL web maps/apps are located on the SMC site and
+  which department posts them, to update, take down, or coordinate. PDFs and Google Maps links are
+  out of scope. Department attribution is deferred to offline analysis (URL, title and now the
+  full stored HTML are in the database).
+- **One sanctioned session.** Because each crawl requires a notification, the crawl collects
+  broadly and the report filters narrowly: `detection.vendors: []` (record everything),
+  `report.vendors: [esri, esri-enterprise]`, `inventory.store_html: all` (gzipped HTML of every
+  page, ~150–250 MB, re-analysable offline without recrawling).
+- **Storage.** Screenshots are not the heavy item (~5–15 MB for ~100 identities); the whole run
+  is ~50–100 MB of database plus the stored HTML. Screenshots can be skipped
+  (`--screenshots none`) and captured later with the new `screenshots` command (one visit per
+  application, ~100 navigations).
+- **`run-crawl`** wraps inventory → scan → arcgis → report with the settled configuration,
+  prints the plan and the web-team notice (`--plan`), prompts once, and is resumable.
+- User-Agent contact set to `jwarsaw@smcgov.org`.
+
+Fixture harness: 96/96 (Phase D exercises `run-crawl`, stored HTML, the report filter and the
+`screenshots` catch-up command).
+
+### 9.9 Operability (2026-09-17)
+
+- Ctrl-C during any crawl phase finishes in-flight pages and exits cleanly; `run-crawl` now stops
+  after an interrupted phase instead of continuing to the next one (it previously did).
+- Rejections (403 / 429 / 401 / 5xx / network errors) are retried, never marked skipped. A rolling
+  window (`http.block_window` 25, `http.block_threshold` 8) trips a circuit breaker that stops the
+  run loudly with everything unfinished left pending; `run-crawl` halts; `meta.blocked_at` is set
+  and `status` shows it. Verified in the harness with a simulated WAF (Phase E).
+- Progress lines include the HTTP status mix of recent requests, pages-with-maps, and the
+  application count; a `NEW application` line is printed on first sighting; `status` gives a
+  read-only snapshot from a second terminal. Harness: 104/104.

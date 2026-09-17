@@ -44,7 +44,7 @@ code{font-size:12px;background:#f3f3f3;padding:1px 4px;border-radius:3px;word-br
 <div class="card"><b>${arcgis.external.length}</b>ArcGIS apps outside the county org</div>
 <div class="card"><b>${coverage.discovered}</b>URLs discovered</div>
 </div>
-<p class="muted">Detection scope: ${cfg.detection && cfg.detection.vendors && cfg.detection.vendors.length ? `vendors <b>${esc(cfg.detection.vendors.join(', '))}</b> only (config.yaml → detection.vendors)` : 'all vendors in rules.yaml'}. Links to map applications are ${cfg.detection && cfg.detection.record_links === false ? 'not recorded' : 'recorded and flagged'}.</p>
+<p class="muted">Detection scope (what the database holds): ${cfg.detection && cfg.detection.vendors && cfg.detection.vendors.length ? `vendors <b>${esc(cfg.detection.vendors.join(', '))}</b> only` : 'all vendors in rules.yaml'}. Report scope (what this page and the CSVs show): ${totals.report_vendors && totals.report_vendors.length ? `vendors <b>${esc(totals.report_vendors.join(', '))}</b> only — ${totals.applications} of ${totals.applications_all_vendors} recorded applications` : 'everything recorded'}. Links to map applications are ${cfg.detection && cfg.detection.record_links === false ? 'not recorded' : 'recorded and flagged'}.</p>
 <h3>By vendor</h3>${table(totals.by_vendor, [{ h: 'Vendor', k: 'vendor' }, { h: 'Applications', k: 'c' }])}
 <h3>By application kind</h3>${table(Object.entries(apps.reduce((m, a) => (m[a.app_kind] = (m[a.app_kind] || 0) + 1, m), {})).sort((x, y) => y[1] - x[1]).map(([k, c]) => ({ k, c })), [{ h: 'Kind', k: 'k' }, { h: 'Applications', k: 'c' }])}
 <h3>By type</h3>${table(totals.by_type, [{ h: 'Type', k: 'type' }, { h: 'Applications', k: 'c' }])}
@@ -84,6 +84,7 @@ ${coverage.pending ? `<b>${coverage.pending} URLs are still pending / in progres
 <div class="card"><b>${coverage.failed}</b>failed</div>
 <div class="card"><b>${coverage.skipped}</b>skipped</div>
 <div class="card"><b>${coverage.pending}</b>pending</div>
+<div class="card"><b>${totals.pages_stored}</b>pages' HTML stored<br><span class="muted">${(totals.pages_stored_bytes / 1048576).toFixed(1)} MB gzipped, re-analysable offline</span></div>
 </div>
 <h3>Discovery by source</h3>${table(coverage.by_source, [{ h: 'Source', k: 'source' }, { h: 'URLs', k: 'c' }])}
 <h3>Queue by status</h3>${table(coverage.by_status, [{ h: 'Status', k: 'status' }, { h: 'URLs', k: 'c' }])}

@@ -29,14 +29,18 @@ Run the fixture harness once to prove the environment works: `npm test` → expe
 Use a dedicated database for everything below so nothing pollutes a later production run:
 `export DB=validation.sqlite` and pass `-d $DB` to every command.
 
-Two config settings shape the run; check them before starting:
+Settings that shape the run (all in `config.yaml`, all pre-set for the sanctioned crawl):
 
-- `detection.vendors` is `[esri, esri-enterprise]` — only Esri findings are recorded. Google
-  "Get Directions" links and other vendors produce nothing.
-- `http.respect_crawl_delay` defaults to `true`, and www.smcgov.org declares `Crawl-delay: 10`,
-  so every page fetch and navigation on the host is spaced 10 s apart. Step 5's 100-page sample
-  then takes about 20–25 minutes. The startup log announces `HONOURED` or `OVERRIDDEN`; do not
-  set it to `false` unless the site owner has approved the faster rate.
+- `detection.vendors: []` records every vendor; `report.vendors: [esri, esri-enterprise]` filters
+  the deliverable to Esri. Google "Get Directions" links are recorded, flagged, never rendered,
+  and excluded from the report.
+- `http.respect_crawl_delay: false` — the web team approved 2 req/s (2026-09-17) provided they are
+  told before each crawl. The startup log announces `OVERRIDDEN`. `run-crawl --plan` prints the
+  notice to send them.
+- `inventory.store_html: all` keeps each page's HTML gzipped in the database.
+
+For the real run, `node bin/cli.js run-crawl` replaces Steps 3–7 below; the runbook's individual
+steps remain useful for validating changes on a handful of pages.
 
 ## 1. Ground-truth pages (the core §14 check)
 

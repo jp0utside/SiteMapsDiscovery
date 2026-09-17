@@ -24,24 +24,29 @@ inventory:
   run_tier1_during_crawl: true  # the BFS fetch doubles as tier-1 static detection (saves a full refetch)
   skip_extensions: [pdf, jpg, jpeg, png, gif, svg, webp, zip, doc, docx, xls, xlsx, ppt, pptx, csv, mp4, mp3, ics, xml, rss, json, txt]
   strip_query_params: ["utm_*", fbclid, gclid, mc_cid, mc_eid, dclid, msclkid]
+  store_html: all               # all | hits | none — keep each page's HTML (gzipped) so rules can be re-run offline, no recrawl
 
 # What counts as a finding. Rules for every vendor stay in rules.yaml; this narrows which ones are live.
 detection:
-  vendors: [esri, esri-enterprise]  # allowlist of rule vendors; [] = every vendor in rules.yaml
-                                    # esri = ArcGIS Online / JS API; esri-enterprise = ArcGIS Enterprise & Geocortex viewers (gis.smcgov.org)
+  vendors: []                       # [] = record every vendor in rules.yaml (the crawl is the same either way; keep the data broad)
+                                    # e.g. [esri, esri-enterprise] to store only Esri findings. esri = ArcGIS Online / JS API;
+                                    # esri-enterprise = ArcGIS Enterprise & Geocortex viewers (gis.smcgov.org)
   record_links: true                # keep <a href> links to map apps as flagged map_link_only findings (false = drop them)
   links_trigger_render: false       # a page whose only signal is a link is NOT a tier-1 hit and is not rendered for that reason
 
 http:
-  user_agent: "SMC-Map-Inventory/1.0 (internal web audit; contact: inventory@smcgis.org)"
+  user_agent: "SMC-Map-Inventory/1.0 (internal web audit; contact: jwarsaw@smcgov.org)"
   requests_per_second_per_host: 2   # rate limit applies PER HOST, not globally
-  respect_crawl_delay: true         # honour robots.txt Crawl-delay (www.smcgov.org asks for 10 s → ~40 h full run).
-                                    # Set false ONLY with the site owner's explicit approval of requests_per_second_per_host.
+  respect_crawl_delay: false        # www.smcgov.org declares Crawl-delay: 10. OVERRIDDEN: the web team approved the faster rate
+                                    # (2026-09-17) on condition of being notified before each crawl. Set true to honour it (~40 h run).
   timeout_ms: 30000
   max_retries: 3
   retry_backoff_ms: 15000            # exponential: 15s, 30s, 60s
   respect_robots: true
   max_html_bytes: 5000000
+  stop_on_block: true               # circuit breaker: stop the run (pages stay pending) when the host starts rejecting us
+  block_window: 25                  # ... judged over the last N page fetches / navigations
+  block_threshold: 8                # ... when at least this many of them were 403 / 429 / 401 / 5xx / network errors
 
 scan:
   concurrency: 3                     # browser contexts / workers (3-5 recommended)
@@ -81,7 +86,8 @@ arcgis:
 
 report:
   dir: ./output
+  vendors: [esri, esri-enterprise]   # what the CSV/HTML show; the database keeps everything detection recorded
   probe_api_keys: true               # single unauthenticated GET per key to detect referrer restriction
-  title: "San Mateo County — www.smcgov.org Map Application Inventory"
+  title: "San Mateo County — www.smcgov.org ArcGIS Application Inventory"
 
 database: ./inventory.sqlite
