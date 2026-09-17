@@ -14,6 +14,7 @@ export class Scope {
     this.recordAlways = scopeCfg.record_always !== false;
     this.skipExt = new Set((inventoryCfg.skip_extensions || []).map(e => e.toLowerCase().replace(/^\./, '')));
     this.stripParams = (inventoryCfg.strip_query_params || []).map(p => globToRegex(p));
+    this.skipPaths = (inventoryCfg.skip_path_patterns || []).map(p => globToRegex(p));
   }
   canonicalHost(host) {
     host = (host || '').toLowerCase();
@@ -50,7 +51,8 @@ export class Scope {
   }
   isAsset(u) {
     const m = u.pathname.toLowerCase().match(/\.([a-z0-9]{1,5})$/);
-    return !!(m && this.skipExt.has(m[1]));
+    if (m && this.skipExt.has(m[1])) return true;
+    return this.skipPaths.some(re => re.test(u.pathname)); // extensionless file endpoints, e.g. Drupal /media/123/download
   }
   /** Full decision for a candidate link: { url, crawl: bool, reason } */
   classify(input, base) {

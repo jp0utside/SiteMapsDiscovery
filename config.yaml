@@ -23,6 +23,8 @@ inventory:
   bfs_link_crawl: true          # BFS same-host link discovery seeded from homepage + sitemaps
   run_tier1_during_crawl: true  # the BFS fetch doubles as tier-1 static detection (saves a full refetch)
   skip_extensions: [pdf, jpg, jpeg, png, gif, svg, webp, zip, doc, docx, xls, xlsx, ppt, pptx, csv, mp4, mp3, ics, xml, rss, json, txt]
+  skip_path_patterns:           # path globs treated as assets (file endpoints with no extension); never fetched
+    - /media/*/download         # Drupal media downloads (PDFs, docs) — thousands of them, up to 5 MB each, never HTML
   strip_query_params: ["utm_*", fbclid, gclid, mc_cid, mc_eid, dclid, msclkid]
   store_html: all               # all | hits | none — keep each page's HTML (gzipped) so rules can be re-run offline, no recrawl
 

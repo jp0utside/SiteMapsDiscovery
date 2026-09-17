@@ -15,7 +15,7 @@ function deepMerge(a, b) {
 const DEFAULTS = {
   scope: { crawl_allowlist: [], normalize_to_www: {}, never_crawl: ['*'], record_always: true },
   seeds: { sitemaps: [] },
-  inventory: { max_urls: 50000, bfs_link_crawl: true, run_tier1_during_crawl: true, skip_extensions: [], strip_query_params: [], store_html: 'all' },
+  inventory: { max_urls: 50000, bfs_link_crawl: true, run_tier1_during_crawl: true, skip_extensions: [], skip_path_patterns: [], strip_query_params: [], store_html: 'all' },
   detection: { vendors: [], record_links: true, links_trigger_render: true },
   http: { user_agent: 'SMC-Map-Inventory/1.0', requests_per_second_per_host: 2, timeout_ms: 30000, max_retries: 3, retry_backoff_ms: 15000, respect_robots: true, respect_crawl_delay: true, max_html_bytes: 5000000, stop_on_block: true, block_window: 25, block_threshold: 8 },
   scan: { concurrency: 3, tier2_sample_rate: 0.2, tier2_networkidle_timeout_ms: 30000, tier2_max_clicks: 10, tier2_scroll_step_px: 800, tier2_scroll_pause_ms: 250, tier2_settle_ms: 1500, context_recycle_pages: 200, stale_in_progress_minutes: 10, max_runtime_minutes: 0, viewport: { width: 1366, height: 900 }, abort_matched_resource_types: ['image', 'media', 'font'], consent: 'auto', record_all_requests: true, max_requests_per_page: 400 },
