@@ -35,7 +35,7 @@ try {
     '/tsd/gis': [[`inpage:leaflet:${u('/tsd/gis')}:div#county-map`, 'interactive_webmap']],
     '/hsa/find-services': [['gmymaps:mid:1XyZ_abc123', 'interactive_webmap'], ['link:google.com/maps', 'map_link_only']],
     '/hsa/contact': [['arcgis:item:aaaa1111bbbb2222cccc3333dddd4444', 'map_link_only']],
-    '/dpw/viewers': [['iframe:gis.smcgov.org/apps/publicviewer/', 'map_link_only']],
+    '/dpw/viewers': [['iframe:gis.smcgov.org/apps/publicviewer/', 'map_link_only'], ['iframe:maps.smcgov.org/apps/parcels/index.html', 'map_link_only'], ['arcgis:service:ORG123abc/Parcels', 'map_link_only'], ['arcgis:service:OTHERORG99/Vendor_Layer', 'map_link_only'], ['iframe:apps.geocortex.com/webviewer/?app=abc123', 'map_link_only'], ['iframe:smc.apps.vertigisstudio.com/web/?app=parcels', 'map_link_only']],
     '/parks/seating': [[`inpage:leaflet:${u('/parks/seating')}:div#seatmap`, 'non_geographic']],
     '/about/shadow-map': [['arcgis:item:ffff0000eeee1111dddd2222cccc3333', 'gis_application']],
     '/tsd/tableau': [['iframe:public.tableau.com/views/SMCDashboard/Map/', 'embedded_third_party'], ['arcgis:item:1234123412341234123412341234abcd', 'map_link_only']],
@@ -126,8 +126,14 @@ try {
   check('arcgis: unreadable item → unknown (NULL)', inOrg('1234123412341234123412341234abcd') == null);
   check('arcgis: orphaned org item listed', !!one(`SELECT 1 FROM arcgis_items i WHERE i.item_id='99998888777766665555444433332222' AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.arcgis_item_id=i.item_id)`));
   check('arcgis: application title backfilled from item metadata', one(`SELECT title FROM applications WHERE arcgis_item_id='aaaa1111bbbb2222cccc3333dddd4444'`)?.title === 'Zoning Map');
+  check('maps.smcgov.org links recorded under vendor esri-enterprise (not the generic map-subdomain rule)', one(`SELECT vendor FROM applications WHERE identity_key='iframe:maps.smcgov.org/apps/parcels/index.html'`)?.vendor === 'esri-enterprise');
+  check('Geocortex / VertiGIS Studio cloud hosts recorded under vendor esri-enterprise', one(`SELECT vendor FROM applications WHERE identity_key='iframe:apps.geocortex.com/webviewer/?app=abc123'`)?.vendor === 'esri-enterprise' && one(`SELECT vendor FROM applications WHERE identity_key='iframe:smc.apps.vertigisstudio.com/web/?app=parcels'`)?.vendor === 'esri-enterprise');
+  check('AGOL hosted services keyed by org id + service name, vendor esri', one(`SELECT vendor FROM applications WHERE identity_key='arcgis:service:ORG123abc/Parcels'`)?.vendor === 'esri');
+  check('arcgis: hosted service in the county org → in_county_org=1; foreign org → 0', one(`SELECT in_county_org c FROM applications WHERE identity_key='arcgis:service:ORG123abc/Parcels'`)?.c === 1 && one(`SELECT in_county_org c FROM applications WHERE identity_key='arcgis:service:OTHERORG99/Vendor_Layer'`)?.c === 0);
+  check('tier 2: unmatched render-time requests are recorded too (fixture host assets)', one(`SELECT COUNT(*) c FROM requests WHERE matched_rule IS NULL AND request_url LIKE 'http://localhost:8765/%'`).c > 0);
   const html = fs.readFileSync('test/out/report.html', 'utf8');
   check('report.html: external bucket surfaces the contractor dashboard', /External[\s\S]*ffff0000eeee1111dddd2222cccc3333/.test(html));
+  check('report.html: external bucket includes the foreign-org hosted service; services section present', /External[\s\S]*arcgis:service:OTHERORG99\/Vendor_Layer/.test(html) && /hosted services referenced by pages/.test(html) && /render-time requests recorded/.test(html));
   check('report.html: coverage section + scope boundary + sample hit rate present', /Coverage/.test(html) && /not crawled/.test(html) && /sample hit rate/.test(html));
   check('findings.jsonl written', fs.readFileSync('test/out/findings.jsonl', 'utf8').trim().split('\n').length === one(`SELECT COUNT(*) c FROM findings`).c);
   db.close();

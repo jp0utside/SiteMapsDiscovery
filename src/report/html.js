@@ -58,6 +58,7 @@ ${arcgis.unknown.length ? `<h3>Unknown ownership — item not publicly readable 
 <h3>Embedded — county org items embedded on crawled pages (${arcgis.embedded.length})</h3>${table(arcgis.embedded, appCols)}
 <h3>Linked only — county org items that pages link to but never embed (${arcgis.linked_only_org.length})</h3><p class="muted">Recorded as <code>map_link_only</code> and flagged. Not orphaned: the site sends visitors to them.</p>${table(arcgis.linked_only_org, appCols)}
 ${arcgis.enterprise.length ? `<h3>ArcGIS Enterprise / Geocortex viewers on county hosts (${arcgis.enterprise.length})</h3><p class="muted">Esri-platform applications served from county infrastructure (e.g. <code>gis.smcgov.org</code>). They have no ArcGIS Online item id, so they cannot be joined to the org list.</p>${table(arcgis.enterprise, appCols)}` : ''}
+${arcgis.services.length ? `<h3>ArcGIS Online hosted services referenced by pages (${arcgis.services.length})</h3><p class="muted">Feature / map / tile services (<code>services.arcgis.com</code>, <code>tiles.arcgis.com</code>) used by embedded or in-page maps. The org id in the URL decides the county-org column.</p>${table(arcgis.services, appCols)}` : ''}
 ${arcgis.esri_inpage.length ? `<h3>Esri maps built in page code, no item id (${arcgis.esri_inpage.length})</h3><p class="muted">ArcGIS JS API maps whose web map id was not observed. Inherently per-page identities.</p>${table(arcgis.esri_inpage, appCols)}` : ''}
 <h3>Orphaned — county org items on no crawled page (${arcgis.orphaned.length})</h3><p class="muted">Publicly shared in the org but never referenced from ${esc(crawlHosts)}. They may be used on other county hosts (not crawled) or be genuinely unused.</p>${table(arcgis.orphaned, itemCols)}
 ${arcgis.non_arcgis_external.length ? `<h3>Other externally hosted maps (${arcgis.non_arcgis_external.length})</h3><p class="muted">Non-ArcGIS applications hosted outside <code>*.smcgov.org</code> (Google, Mapbox, third-party viewers, …).</p>${table(arcgis.non_arcgis_external, appCols)}` : ''}
@@ -85,6 +86,7 @@ ${coverage.pending ? `<b>${coverage.pending} URLs are still pending / in progres
 <div class="card"><b>${coverage.skipped}</b>skipped</div>
 <div class="card"><b>${coverage.pending}</b>pending</div>
 <div class="card"><b>${totals.pages_stored}</b>pages' HTML stored<br><span class="muted">${(totals.pages_stored_bytes / 1048576).toFixed(1)} MB gzipped, re-analysable offline</span></div>
+<div class="card"><b>${totals.requests_recorded}</b>render-time requests recorded<br><span class="muted">${totals.request_hosts} distinct hosts, searchable offline</span></div>
 </div>
 <h3>Discovery by source</h3>${table(coverage.by_source, [{ h: 'Source', k: 'source' }, { h: 'URLs', k: 'c' }])}
 <h3>Queue by status</h3>${table(coverage.by_status, [{ h: 'Status', k: 'status' }, { h: 'URLs', k: 'c' }])}

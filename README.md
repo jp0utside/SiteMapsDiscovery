@@ -231,8 +231,17 @@ fetched page), `findings` (raw grain), `requests` (matched network requests per 
 `applications` (deduplicated grain), `arcgis_items` (org enumeration + individually looked-up
 external items), `meta`. See `src/lib/db.js`.
 
-Re-analysing stored HTML offline: `SELECT url, html_gz FROM pages` and `zlib.gunzipSync` — the
-same `detectStatic()` in `src/lib/tier1.js` can be run over it with an edited `rules.yaml`.
+**Searching for hosts you did not think of up front.** Two things make a later question
+answerable without a new crawl: every page's HTML is in `pages` (`SELECT url, html_gz FROM pages`,
+`zlib.gunzipSync`, then grep or re-run `detectStatic()` from `src/lib/tier1.js` with an edited
+`rules.yaml`), and every request a rendered page made is in `requests` — matched rules with
+`matched_rule` set, everything else with it NULL (`scan.record_all_requests`, query strings
+stripped, deduped per page, capped at 400). Rules match by host and path pattern, so a new host is
+a one-line rule, not a list of URLs.
+
+ArcGIS Online hosted services (`services.arcgis.com`, `tiles.arcgis.com`) get their own identity,
+`arcgis:service:<orgId>/<ServiceName>`; the org id in the URL sets `in_county_org` in the
+cross-reference, so a JS API map's layers are attributed even though they are not items.
 
 ## Extending the rules
 

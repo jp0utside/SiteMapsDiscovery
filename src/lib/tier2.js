@@ -22,6 +22,12 @@ export async function renderPage(context, url, { cfg, rules, isNewIdentity, scre
       if (locked && req.isNavigationRequest() && isMain) return route.abort('aborted'); // never navigate away
       const rurl = req.url();
       const m = rules.matchRequestUrl(rurl);
+      if (!m && scan.record_all_requests !== false) {
+        // Unmatched requests are kept too (query stripped, deduped per page, capped) so hosts nobody thought of
+        // can still be searched offline after the crawl.
+        const bare = rurl.split('?')[0].split('#')[0]; const key = 'all|' + bare;
+        if (!reqSeen.has(key) && requests.length < (scan.max_requests_per_page || 400)) { reqSeen.add(key); requests.push({ request_url: bare.slice(0, 2000), resource_type: req.resourceType(), initiator: isMain ? 'main' : (req.frame().url() || 'frame'), matched_rule: null, aborted: 0, main: isMain, unmatched: true }); }
+      }
       if (m) {
         const rtype = req.resourceType();
         const initiator = isMain ? 'main' : (req.frame().url() || 'frame');
@@ -186,14 +192,14 @@ export function composeFindings(pageUrl, dom, requests, frames, rules, priorStro
   // Network → main-frame requests only create page-level findings; sub-frame requests are attributed to the frame.
   const byRule = new Map();
   for (const r of requests || []) {
-    if (!r.main) continue;
+    if (!r.main || !r.matched_rule) continue; // unmatched requests are stored for offline search only, never findings
     const k = r.matched_rule; if (!byRule.has(k)) byRule.set(k, { ...r, count: 0 }); byRule.get(k).count++;
   }
   for (const r of byRule.values()) {
     const rule = { id: r.matched_rule, vendor: r.vendor, type: r.type, confidence: r.confidence };
     const ident = resolveIdentity(r.request_url, rules);
     let key, placement = 'main_content', container = '*', extra = {}, type = r.type, nonGeo = false;
-    if (ident && (ident.arcgisItemId || ident.key.startsWith('mapbox:style:') || ident.key.startsWith('gmymaps:'))) { key = ident.key; extra = ident; }
+    if (ident && (ident.arcgisItemId || ident.key.startsWith('arcgis:service:') || ident.key.startsWith('mapbox:style:') || ident.key.startsWith('gmymaps:'))) { key = ident.key; extra = ident; }
     else if (r.kind === 'static_map_api') { key = ident ? ident.key : inpageIdentity(r.vendor, pageUrl, '*'); extra = ident || {}; type = 'static_map_image'; }
     else {
       // tiles / vendor assets loaded by the page: attribute to the matching (or only) in-page container
