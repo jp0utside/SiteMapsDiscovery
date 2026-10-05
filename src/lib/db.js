@@ -130,4 +130,5 @@ export function finishRun(db, id, summary) {
   db.prepare('UPDATE runs SET finished_at=?, summary_json=? WHERE id=?').run(now(), JSON.stringify(summary || {}), id);
 }
 export function setMeta(db, k, v) { db.prepare('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k, typeof v === 'string' ? v : JSON.stringify(v)); }
+export function delMeta(db, k) { db.prepare('DELETE FROM meta WHERE key=?').run(k); }
 export function getMeta(db, k) { const r = db.prepare('SELECT value FROM meta WHERE key=?').get(k); return r ? r.value : null; }

@@ -249,10 +249,10 @@ try {
   console.log('\n=== Phase E: simulated WAF (403 after 12 page fetches) ===');
   const server2 = spawn('node', ['test/fixture-site/server.js', '8766'], { stdio: 'inherit', env: { ...process.env, FIXTURE_BLOCK_AFTER: 12 } });
   await sleep(700);
+  const runW = (args) => spawnSync('node', ['bin/cli.js', '-c', 'test/out/config-waf.yaml', ...args], { encoding: 'utf8' });
   try {
     const wafCfg = fs.readFileSync('test/out/config-prod.yaml', 'utf8').replace(/8765/g, '8766').replace('database: ./test/out/prod.sqlite', 'database: ./test/out/waf.sqlite').replace('retry_backoff_ms: 200', 'retry_backoff_ms: 60000');
     fs.writeFileSync('test/out/config-waf.yaml', wafCfg);
-    const runW = (args) => spawnSync('node', ['bin/cli.js', '-c', 'test/out/config-waf.yaml', ...args], { encoding: 'utf8' });
     const rw = runW(['run-crawl', '--no-confirm', '--screenshots', 'none']);
     const out = rw.stdout + rw.stderr;
     check('WAF: run-crawl stops loudly when the host starts rejecting requests', rw.status === 0 && /HOST IS REJECTING REQUESTS/.test(out) && /run-crawl STOPPED during inventory/.test(out), out.slice(-400));
@@ -266,6 +266,64 @@ try {
     const sw = runW(['status']);
     check('WAF: status shows BLOCKED and the 403 count', /BLOCKED:/.test(sw.stdout) && /403×\d+/.test(sw.stdout));
   } finally { server2.kill(); }
+  // ... the block lifts: the same queue resumes, each rejected page has used one attempt, and the BLOCKED flag goes away
+  await sleep(500);
+  const server2b = spawn('node', ['test/fixture-site/server.js', '8766'], { stdio: 'inherit' });
+  await sleep(700);
+  try {
+    const dbW2 = new Database('test/out/waf.sqlite');
+    check('WAF: a rejected fetch uses up exactly one attempt', dbW2.prepare(`SELECT MIN(attempts) lo, MAX(attempts) hi FROM urls WHERE status='pending' AND error LIKE 'HTTP 403%'`).get().hi === 1 && dbW2.prepare(`SELECT MAX(attempts) hi FROM urls WHERE error IS NULL`).get().hi === 0, JSON.stringify(dbW2.prepare('SELECT attempts, error, COUNT(*) c FROM urls GROUP BY 1,2').all()));
+    dbW2.prepare('UPDATE urls SET retry_after=NULL').run(); dbW2.close(); // do not wait out the backoff
+    const rr = runW(['inventory']); const outR = rr.stdout + rr.stderr;
+    const dbW3 = new Database('test/out/waf.sqlite', { readonly: true });
+    check('WAF: re-run after the block lifts completes the crawl', rr.status === 0 && /BFS crawl complete/.test(outR) && dbW3.prepare(`SELECT COUNT(*) c FROM urls WHERE links_done=0 AND status IN ('pending','failed')`).get().c === 0, outR.slice(-300));
+    check('WAF: BLOCKED flag cleared once the host answers again', !dbW3.prepare(`SELECT value FROM meta WHERE key='blocked_at'`).get() && !/BLOCKED:/.test(runW(['status']).stdout));
+    dbW3.close();
+  } finally { server2b.kill(); }
+
+  // ---- Phase E2: the site refuses a run of individual pages (403 for everyone) while the host is healthy → skip them, do not stop
+  console.log('\n=== Phase E2: page-level 403s (restricted pages, host healthy) ===');
+  const server3 = spawn('node', ['test/fixture-site/server.js', '8767'], { stdio: 'inherit', env: { ...process.env, FIXTURE_DENIED_PAGES: 10 } });
+  await sleep(700);
+  try {
+    fs.writeFileSync('test/out/config-denied.yaml', fs.readFileSync('test/out/config-prod.yaml', 'utf8').replace(/8765/g, '8767').replace('database: ./test/out/prod.sqlite', 'database: ./test/out/denied.sqlite'));
+    const rn = spawnSync('node', ['bin/cli.js', '-c', 'test/out/config-denied.yaml', 'inventory'], { encoding: 'utf8' });
+    const outN = rn.stdout + rn.stderr;
+    check('denied pages: the crawl does NOT stop as blocked', rn.status === 0 && !/HOST IS REJECTING REQUESTS/.test(outN) && /BFS crawl complete/.test(outN), outN.slice(-400));
+    const dbN = new Database('test/out/denied.sqlite', { readonly: true });
+    const on = (sql) => dbN.prepare(sql).get();
+    check('denied pages: all 10 skipped as http_403, nothing left pending or failed', on(`SELECT COUNT(*) c FROM urls WHERE url LIKE '%/restricted/%' AND status='skipped' AND skip_reason='http_403'`).c === 10 && on(`SELECT COUNT(*) c FROM urls WHERE status IN ('pending','failed') AND links_done=0`).c === 0, JSON.stringify(dbN.prepare('SELECT status, skip_reason, COUNT(*) c FROM urls GROUP BY 1,2').all()));
+    check('denied pages: no blocked_at recorded', !on(`SELECT value FROM meta WHERE key='blocked_at'`));
+    dbN.close();
+    // render phase: a page that was fine during the crawl is denied to everyone by render time → skipped, scan carries on
+    const runN = (args) => spawnSync('node', ['bin/cli.js', '-c', 'test/out/config-denied.yaml', ...args], { encoding: 'utf8' });
+    const rs = runN(['scan', '--tier', '2', '--screenshots', 'none']); const outS = rs.stdout + rs.stderr;
+    const dbN2 = new Database('test/out/denied.sqlite', { readonly: true });
+    const late = dbN2.prepare(`SELECT status, skip_reason FROM urls WHERE url LIKE '%/late/restricted-map'`).get();
+    check('denied pages: a render denied to everyone is skipped as http_403 and the scan does not stop', rs.status === 0 && !/HOST IS REJECTING REQUESTS/.test(outS) && late?.status === 'skipped' && late?.skip_reason === 'http_403' && dbN2.prepare(`SELECT COUNT(*) c FROM urls WHERE tier2_done=1`).get().c > 0, JSON.stringify(late) + outS.slice(-300));
+    dbN2.close();
+    // tier-1 inside scan (sitemap-only inventory, so scan does the fetching) takes the same decision
+    fs.writeFileSync('test/out/config-denied-scan.yaml', fs.readFileSync('test/out/config-denied.yaml', 'utf8').replace('database: ./test/out/denied.sqlite', 'database: ./test/out/denied-scan.sqlite'));
+    const runNS = (args) => spawnSync('node', ['bin/cli.js', '-c', 'test/out/config-denied-scan.yaml', ...args], { encoding: 'utf8' });
+    runNS(['inventory', '--no-crawl']); const rs1 = runNS(['scan', '--tier', '1']); const outS1 = rs1.stdout + rs1.stderr;
+    const dbN3 = new Database('test/out/denied-scan.sqlite', { readonly: true });
+    check('denied pages: scan tier 1 skips them as http_403 without stopping', rs1.status === 0 && !/HOST IS REJECTING REQUESTS/.test(outS1) && dbN3.prepare(`SELECT COUNT(*) c FROM urls WHERE url LIKE '%/restricted/page-%' AND skip_reason='http_403'`).get().c === 10, outS1.slice(-300));
+    dbN3.close();
+  } finally { server3.kill(); }
+
+  // ---- Phase E3: only the headless browser is rejected (plain fetches still work) → that IS a block; the homepage check must not excuse it
+  console.log('\n=== Phase E3: browser-only rejection (bot detection) ===');
+  const server4 = spawn('node', ['test/fixture-site/server.js', '8768'], { stdio: 'inherit', env: { ...process.env, FIXTURE_BLOCK_BROWSER: 1 } });
+  await sleep(700);
+  try {
+    fs.writeFileSync('test/out/config-botblock.yaml', fs.readFileSync('test/out/config-prod.yaml', 'utf8').replace(/8765/g, '8768').replace('database: ./test/out/prod.sqlite', 'database: ./test/out/botblock.sqlite'));
+    const runB = (args) => spawnSync('node', ['bin/cli.js', '-c', 'test/out/config-botblock.yaml', ...args], { encoding: 'utf8' });
+    const ri = runB(['inventory']); const rb = runB(['scan', '--tier', '2', '--screenshots', 'none']); const outB = rb.stdout + rb.stderr;
+    const dbB = new Database('test/out/botblock.sqlite', { readonly: true });
+    check('browser-only rejection: the crawl itself is unaffected', /BFS crawl complete/.test(ri.stdout + ri.stderr));
+    check('browser-only rejection: scan stops as BLOCKED, nothing skipped as http_403', /HOST IS REJECTING REQUESTS/.test(outB) && dbB.prepare(`SELECT COUNT(*) c FROM urls WHERE skip_reason LIKE 'http_403%'`).get().c === 0 && !!dbB.prepare(`SELECT value FROM meta WHERE key='blocked_at'`).get(), outB.slice(-400));
+    dbB.close();
+  } finally { server4.kill(); }
 
   // ---- Phase F: disk guard (threshold set impossibly high so it trips immediately)
   console.log('\n=== Phase F: disk-space guard ===');

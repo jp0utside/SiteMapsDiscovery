@@ -1,5 +1,5 @@
 import { loadConfig, TOOL_VERSION } from '../lib/config.js';
-import { openDb, startRun, finishRun, now, setMeta, getMeta } from '../lib/db.js';
+import { openDb, startRun, finishRun, now, setMeta, getMeta, delMeta } from '../lib/db.js';
 import { Scope } from '../lib/url.js';
 import { HttpClient, isHtml } from '../lib/fetch.js';
 import { parseRobots } from '../lib/robots.js';
@@ -10,7 +10,7 @@ import { log, fmtDuration } from '../lib/log.js';
 import { applyDetectionPolicy, isHit } from '../lib/detection.js';
 import { applyCrawlDelay } from '../lib/robots.js';
 import { hostOf } from '../lib/url.js';
-import { HealthMonitor, isBlockStatus } from '../lib/health.js';
+import { HealthMonitor, Canary, isBlockStatus, isDenialStatus } from '../lib/health.js';
 import { diskGuard } from '../lib/disk.js';
 
 /**
@@ -25,7 +25,7 @@ export async function inventory(opts) {
   const store = new Store(db);
   const runId = startRun(db, 'inventory', cfg, TOOL_VERSION);
   const maxUrls = cfg.inventory.max_urls || 50000;
-  let capReached = false; const stats = { sitemap: 0, robots_sitemaps: 0, crawl: 0, seed: 0, skipped_asset: 0, skipped_robots: 0, out_of_scope: 0, fetched: 0, errors: 0 };
+  let capReached = false; const stats = { sitemap: 0, robots_sitemaps: 0, crawl: 0, seed: 0, skipped_asset: 0, skipped_robots: 0, out_of_scope: 0, fetched: 0, errors: 0, denied: 0 };
 
   const insStmt = db.prepare(`INSERT OR IGNORE INTO urls(url, source, discovered_at, status, skip_reason) VALUES (?,?,?,?,?)`);
   const countStmt = db.prepare('SELECT COUNT(*) c FROM urls');
@@ -73,12 +73,13 @@ export async function inventory(opts) {
   if (cfg.inventory.bfs_link_crawl !== false && opts.crawl !== false) {
     const claim = db.prepare(`SELECT url FROM urls WHERE links_done=0 AND status IN ('pending','done') AND (retry_after IS NULL OR retry_after <= ?) ORDER BY rowid LIMIT ?`);
     const markLinks = db.prepare('UPDATE urls SET links_done=1 WHERE url=?');
-    const updFetch = db.prepare('UPDATE urls SET http_status=?, final_url=?, title=COALESCE(?, title), last_attempt_at=?, attempts=attempts+1 WHERE url=?');
+    const updFetch = db.prepare('UPDATE urls SET http_status=?, final_url=?, title=COALESCE(?, title), last_attempt_at=? WHERE url=?'); // attempts counts FAILED tries only (markRetry)
     const markSkip = db.prepare(`UPDATE urls SET status='skipped', skip_reason=?, tier1_done=1, tier2_reason='none', links_done=1 WHERE url=? AND status='pending'`);
     const markTier1 = db.prepare(`UPDATE urls SET tier1_done=1, tier1_hit=?, tier2_reason=?, status=CASE WHEN ?='none' THEN 'done' ELSE status END WHERE url=? AND status='pending' AND tier1_done=0`);
     const markErr = db.prepare(`UPDATE urls SET error=?, last_attempt_at=? WHERE url=?`);
     const concurrency = Math.max(1, Math.min(8, cfg.scan.concurrency || 3));
     const health = new HealthMonitor({ window: cfg.http.block_window, threshold: cfg.http.block_threshold });
+    const canary = new Canary(http, cfg.seeds.homepage);
     const markRetry = db.prepare(`UPDATE urls SET attempts=attempts+1, error=?, last_attempt_at=?, retry_after=?, status=CASE WHEN attempts+1 >= ? THEN 'failed' ELSE status END, links_done=CASE WHEN attempts+1 >= ? THEN 1 ELSE links_done END WHERE url=?`);
     const t0 = Date.now(); let processed = 0; let stopping = false; let blocked = false; let diskFull = false;
     const checkDisk = () => { if (diskFull) return; const m = diskGuard(cfg); if (m) { diskFull = true; stopping = true; setMeta(db, 'disk_full_at', JSON.stringify({ at: now(), phase: 'inventory', message: m })); log.loud(m); } };
@@ -98,9 +99,12 @@ export async function inventory(opts) {
         log.warn(`fetch error ${url}: ${String(e.message).split('\n')[0].slice(0, 120)} (will retry)`);
         return;
       }
-      stats.fetched++; health.record(res.status);
+      // 401 / 403 while the homepage still answers: the page itself is restricted (e.g. an unpublished Drupal node), not a block.
+      const pageDenied = isDenialStatus(res.status) && await canary.hostOk();
+      stats.fetched++; health.record(res.status, { pageLevel: pageDenied });
       const finalNorm = scope.normalize(res.finalUrl)?.toString() || res.finalUrl;
       updFetch.run(res.status, res.finalUrl, null, now(), url);
+      if (pageDenied) { markSkip.run(`http_${res.status}`, url); markLinks.run(url); stats.denied++; log.info(`HTTP ${res.status} for ${url} — the site denies access to this page (homepage still answers); skipped as http_${res.status}`); return; }
       if (isBlockStatus(res.status)) {
         // Not a property of the page: a WAF / rate limiter / outage. Retry later rather than marking the page skipped.
         const max = cfg.http.max_retries || 3; const backoff = (cfg.http.retry_backoff_ms || 15000) * 4;
@@ -150,6 +154,7 @@ export async function inventory(opts) {
       if (capReached && !db.prepare(`SELECT 1 FROM urls WHERE links_done=0 AND status IN ('pending','done') LIMIT 1`).get()) break;
     }
     process.off('SIGINT', onSig); process.off('SIGTERM', onSig);
+    if (!blocked && health.sawSuccess() && getMeta(db, 'blocked_at')) { delMeta(db, 'blocked_at'); log.info('the host is answering normally again; cleared the BLOCKED flag left by an earlier run'); }
     log.info(`BFS crawl ${blocked ? 'STOPPED (host rejecting requests)' : diskFull ? 'STOPPED (low disk)' : stopping ? 'interrupted' : 'complete'}: ${processed} pages fetched in ${fmtDuration(Date.now() - t0)}; http totals ${health.totals()}`);
     stats.interrupted = stopping && !blocked && !diskFull; stats.blocked = blocked; stats.diskFull = diskFull;
   }

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadConfig, TOOL_VERSION } from '../lib/config.js';
-import { openDb, startRun, finishRun, now, getMeta, setMeta } from '../lib/db.js';
+import { openDb, startRun, finishRun, now, getMeta, setMeta, delMeta } from '../lib/db.js';
 import { Scope } from '../lib/url.js';
 import { HttpClient, isHtml } from '../lib/fetch.js';
 import { parseRobots } from '../lib/robots.js';
@@ -15,7 +15,7 @@ import { hostOf } from '../lib/url.js';
 import { log, fmtDuration } from '../lib/log.js';
 import { applyDetectionPolicy, isHit } from '../lib/detection.js';
 import { applyCrawlDelay } from '../lib/robots.js';
-import { HealthMonitor, isBlockStatus } from '../lib/health.js';
+import { HealthMonitor, Canary, isBlockStatus, isDenialStatus } from '../lib/health.js';
 import { diskGuard } from '../lib/disk.js';
 
 /**
@@ -93,6 +93,11 @@ export async function scan(opts) {
   log.info(`detection: vendors ${rules.vendorAllowlist.length ? rules.vendorAllowlist.join(',') : 'ALL'}; links ${cfg.detection.record_links === false ? 'dropped' : 'recorded (flagged)'}; links trigger render: ${cfg.detection.links_trigger_render !== false}`);
 
   const health = new HealthMonitor({ window: cfg.http.block_window, threshold: cfg.http.block_threshold });
+  const canary = new Canary(http, cfg.seeds.homepage);
+  // A denied RENDER is page-level only if a plain fetch of the same page is denied too while the homepage still answers.
+  // If the plain fetch works, it is the browser that is being rejected — that is a block, and must stay one.
+  const deniedForEveryone = async (url) => { try { const s = await http.get(url, { maxBytes: 4096 }); return isDenialStatus(s.status) && await canary.hostOk(); } catch { return false; } };
+  const skipDenied = (url, status) => { upd.skip.run(`http_${status}`, url); skipped++; log.info(`HTTP ${status} for ${url} — the site denies access to this page (homepage still answers); skipped as http_${status}`); return 'skipped'; };
   let blocked = false, diskFull = false;
   const checkDisk = () => { if (diskFull) return; const m = diskGuard(cfg); if (m) { diskFull = true; stopping = true; setMeta(db, 'disk_full_at', JSON.stringify({ at: now(), phase: 'scan', message: m })); log.loud(m); } };
   const checkBlocked = (phase) => { if (blocked || cfg.http.stop_on_block === false || !health.isBlocked()) return; blocked = true; stopping = true; setMeta(db, 'blocked_at', JSON.stringify({ at: now(), phase, summary: health.summary() })); log.loud(`HOST IS REJECTING REQUESTS (${health.summary()}). Stopping the scan so the inventory is not falsely clean. Unfinished pages stay pending; investigate (WAF? rate limit?) then re-run to resume.`); };
@@ -121,9 +126,11 @@ export async function scan(opts) {
     if (tiers.includes(1) && !row.tier1_done) {
       let res;
       try { res = await http.getText(url); } catch (e) { health.record(null); throw e; }
-      health.record(res.status);
+      const pageDenied = isDenialStatus(res.status) && await canary.hostOk();
+      health.record(res.status, { pageLevel: pageDenied });
       const finalNorm = scope.normalize(res.finalUrl)?.toString() || res.finalUrl;
       upd.fetch.run(res.status, res.finalUrl, null, url);
+      if (pageDenied) return skipDenied(url, res.status);
       if (isBlockStatus(res.status)) throw new Error(`HTTP ${res.status} (block/outage — retrying, not skipping)`);
       if (res.status >= 400) { upd.skip.run(`http_${res.status}`, url); skipped++; return 'skipped'; }
       if (!isHtml(res.contentType)) { upd.skip.run('non_html', url); skipped++; return 'skipped'; }
@@ -149,7 +156,9 @@ export async function scan(opts) {
       const ctx = await pool.context(workerId, { cookies: consentCookies });
       const r = await renderPage(ctx, url, { cfg, rules, consent, priorStrong: store.strongKeysForUrl(url), isNewIdentity: (k) => store.needsScreenshot(k), screenshot: (page, key, sel, bbox) => shots.shouldCapture(key, store.needsScreenshot(key)) ? shots.capture(page, key, sel, bbox) : null });
       if (r.error && !r.dom) { health.record(null); throw new Error(`render: ${r.error}`); }
-      health.record(r.httpStatus);
+      const renderDenied = isDenialStatus(r.httpStatus) && await deniedForEveryone(url);
+      health.record(r.httpStatus, { pageLevel: renderDenied });
+      if (renderDenied) return skipDenied(url, r.httpStatus);
       if (isBlockStatus(r.httpStatus)) throw new Error(`HTTP ${r.httpStatus} on render (block/outage — retrying, not skipping)`);
       r.findings = applyDetectionPolicy(r.findings, cfg);
       const t2hit = r.findings.some(f => f.placement !== 'site_chrome' && f.type !== 'map_link_only') ? 1 : 0;
@@ -196,6 +205,7 @@ export async function scan(opts) {
   progress();
   if (Date.now() >= deadline) log.warn(`max_runtime_minutes (${cfg.scan.max_runtime_minutes}) reached; stopping. Re-run scan to resume.`);
   if (stopping && !blocked) log.warn('interrupted; re-run scan to resume where it left off.');
+  if (!blocked && health.sawSuccess() && getMeta(db, 'blocked_at')) { delMeta(db, 'blocked_at'); log.info('the host is answering normally again; cleared the BLOCKED flag left by an earlier run'); }
   if (blocked) log.loud(`scan STOPPED because the host is rejecting requests (${health.summary()}). ${remainingStmt.get().c} URLs remain pending.`);
   if (diskFull) log.loud(`scan STOPPED because disk space is low. ${remainingStmt.get().c} URLs remain pending.`);
   log.info(`http totals this run: ${health.totals() || 'none'}`);

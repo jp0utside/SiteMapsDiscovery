@@ -92,6 +92,13 @@ for (let i = 1; i <= 24; i++) pages[`/news/article-${i}`] = chrome(`Article ${i}
 pages['/news/article-25'] = chrome('Article 25', `<h1>Article 25</h1><p>Only reachable by links (not in sitemap).</p>`);
 
 const sitemapUrls = Object.keys(pages).filter(p => !p.startsWith('/news/article-25'));
+// Pages the site itself refuses (403 for everyone, like unpublished CMS content) — listed back to back in the sitemap.
+const DENIED_PAGES = Number(process.env.FIXTURE_DENIED_PAGES || 0);
+for (let i = 1; i <= DENIED_PAGES; i++) sitemapUrls.push(`/restricted/page-${i}`);
+if (DENIED_PAGES) sitemapUrls.push('/late/restricted-map'); // answers 200 once (the crawl), then 403 for everyone (the render)
+let lateFetches = 0;
+// Simulate bot detection that rejects only the headless browser: page navigations get 403, plain fetches still work.
+const BLOCK_BROWSER = !!process.env.FIXTURE_BLOCK_BROWSER;
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 const fakeLeaflet = `window.L = { map(id, o) { const el = document.getElementById(id); el.classList.add('leaflet-container'); for (let x = 0; x < 3; x++) for (let y = 0; y < 2; y++) { const i = new Image(); i.src = '/tiles/12/' + (655 + x) + '/' + (1583 + y) + '.png'; el.appendChild(i); } const a = document.createElement('div'); a.className = 'leaflet-control-attribution'; a.innerHTML = '<a href="https://leafletjs.com">Leaflet</a> | &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'; el.appendChild(a); return { on(){} }; } };`;
 
@@ -124,6 +131,9 @@ const server = http.createServer((req, res) => {
   if (p === '/files/report.pdf') return send(200, 'application/pdf', '%PDF-1.4 fake');
   if (p === '/redirect-old') return send(301, 'text/plain', '', { location: '/tsd/gis' });
   if (p === '/tsd/broken') return send(500, 'text/html', '<h1>500</h1>');
+  if (DENIED_PAGES && p.startsWith('/restricted/')) return send(403, 'text/html', chrome('Access denied', '<h1>Access denied</h1>'));
+  if (DENIED_PAGES && p === '/late/restricted-map') return ++lateFetches === 1 ? send(200, 'text/html; charset=utf-8', chrome('Restricted map', '<h1>Soon to be restricted</h1>')) : send(403, 'text/html', chrome('Access denied', '<h1>Access denied</h1>'));
+  if (BLOCK_BROWSER && req.headers['upgrade-insecure-requests'] && !/^\/(assets|tiles|sharing)/.test(p)) return send(403, 'text/html', '<h1>403 Forbidden (simulated bot detection)</h1>');
   // Mock ArcGIS REST
   if (p === '/sharing/rest/portals/self') return json({ id: ORG_ID, name: 'County of San Mateo (mock)', urlKey: 'smcmaps' });
   if (p === '/sharing/rest/search') { const start = Number(u.searchParams.get('start') || 1); const num = Number(u.searchParams.get('num') || 100); const slice = orgItems.slice(start - 1, start - 1 + num); return json({ total: orgItems.length, start, num, nextStart: start - 1 + num < orgItems.length ? start + num : -1, results: slice }); }
