@@ -115,6 +115,10 @@ export function clickCandidatesScript(R) {
     if (tag === 'input') return true;
     return false;
   }
+  // Generic toggles in the site header / nav / footer are the same menus on every page: clicking them finds nothing new,
+  // costs seconds per page, and used to exhaust the click cap before any control in the page content was reached.
+  const chromeSel = (R.chromeSelectors || []).join(',');
+  function inChrome(el) { if (!chromeSel) return false; let p = el; while (p) { try { if (p.matches && p.matches(chromeSel)) return true; } catch { return false; } p = parentOf(p); } return false; }
   function visible(el) { try { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none'; } catch { return false; } }
   function consider(el, why) {
     if (seen.has(el) || cands.length >= R.max) return; if (navigates(el) || !visible(el)) return;
@@ -129,7 +133,7 @@ export function clickCandidatesScript(R) {
       if (textRe.test(blob) && blob.length < 400) consider(el, 'text');
     }
   });
-  for (const sel of R.controlSelectors) { let els = []; walk(document.documentElement, el => { try { if (el.matches(sel)) els.push(el); } catch {} }); for (const el of els) consider(el, 'control'); }
+  for (const sel of R.controlSelectors) { let els = []; walk(document.documentElement, el => { try { if (el.matches(sel)) els.push(el); } catch {} }); for (const el of els) if (!inChrome(el)) consider(el, 'control'); }
   return cands;
 }
 

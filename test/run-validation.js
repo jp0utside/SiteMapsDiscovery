@@ -33,7 +33,7 @@ try {
     '/privacy-policy': [],
     '/planning/gis-map-zoning-and-other-info-0': [['arcgis:item:aaaa1111bbbb2222cccc3333dddd4444', 'map_link_only'], ['iframe:maps.googleapis.com/maps/api/staticmap/?center=37.5,-122.3', 'static_map_image'], ['link:google.com/maps', 'map_link_only']],
     '/tsd/gis': [[`inpage:leaflet:${u('/tsd/gis')}:div#county-map`, 'interactive_webmap']],
-    '/hsa/find-services': [['gmymaps:mid:1XyZ_abc123', 'interactive_webmap'], ['link:google.com/maps', 'map_link_only']],
+    '/hsa/find-services': [['gmymaps:mid:1XyZ_abc123', 'interactive_webmap'], ['gmymaps:mid:2AbC_def456', 'interactive_webmap'], ['link:google.com/maps', 'map_link_only']],
     '/hsa/contact': [['arcgis:item:aaaa1111bbbb2222cccc3333dddd4444', 'map_link_only']],
     '/dpw/viewers': [['iframe:gis.smcgov.org/apps/publicviewer/', 'map_link_only'], ['iframe:maps.smcgov.org/apps/parcels/index.html', 'map_link_only'], ['arcgis:service:ORG123abc/Parcels', 'map_link_only'], ['arcgis:service:OTHERORG99/Vendor_Layer', 'map_link_only'], ['iframe:apps.geocortex.com/webviewer/?app=abc123', 'map_link_only'], ['iframe:smc.apps.vertigisstudio.com/web/?app=parcels', 'map_link_only']],
     '/parks/seating': [[`inpage:leaflet:${u('/parks/seating')}:div#seatmap`, 'non_geographic']],
@@ -100,6 +100,7 @@ try {
   check('all queued URLs finished (no pending / in_progress / failed)', one(`SELECT COUNT(*) c FROM urls WHERE status IN ('pending','in_progress','failed')`).c === 0, JSON.stringify(q(`SELECT status, COUNT(*) c FROM urls GROUP BY status`)));
 
   // Tier 2 specifics
+  check('tier 2: accordion-revealed map found although the site nav has 10 toggles of its own (nav toggles are not clicked)', !!one(`SELECT 1 FROM findings WHERE url=? AND identity_key='gmymaps:mid:2AbC_def456' AND tier=2`, u('/hsa/find-services')));
   check('tier 2: click-revealed Google My Maps iframe found (signal iframe, tier 2)', !!one(`SELECT 1 FROM findings WHERE url=? AND identity_key='gmymaps:mid:1XyZ_abc123' AND signal_type='iframe' AND tier=2`, u('/hsa/find-services')));
   check('tier 2: shadow-DOM iframe found (signal iframe, tier 2)', !!one(`SELECT 1 FROM findings WHERE url=? AND identity_key='arcgis:item:ffff0000eeee1111dddd2222cccc3333' AND signal_type='iframe' AND tier=2`, u('/about/shadow-map')));
   const gisSig = q(`SELECT DISTINCT signal_type FROM findings WHERE url=? AND identity_key LIKE 'inpage:leaflet:%'`, u('/tsd/gis')).map(r => r.signal_type).sort();

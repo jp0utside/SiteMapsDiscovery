@@ -196,6 +196,8 @@ map_adjacent:
 # TIER-2 INTERACTION
 # ---------------------------------------------------------------------------
 interaction:
+  click_site_chrome: false          # generic toggles (below) inside header / nav / footer are NOT clicked: they are the same menus on
+                                    # every page and used up the whole click budget. Controls whose text matches click_text_regex are still clicked anywhere.
   click_text_regex: "\\b(map|view map|show map|locator|directions)\\b"
   control_selectors:
     - "[role=tab]"

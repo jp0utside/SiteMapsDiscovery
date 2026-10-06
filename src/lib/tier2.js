@@ -93,7 +93,7 @@ async function scrollThrough(page, step, pause) {
 }
 
 async function clickProbe(page, rules, max) {
-  const R = { clickTextRegex: rules.interaction.click_text_regex || 'map', controlSelectors: rules.interaction.control_selectors || [], max };
+  const R = { clickTextRegex: rules.interaction.click_text_regex || 'map', controlSelectors: rules.interaction.control_selectors || [], chromeSelectors: rules.interaction.click_site_chrome ? [] : (rules.placement.chrome_selectors || []), max };
   const cands = await page.evaluate(clickCandidatesScript, R);
   const clicked = [];
   for (const c of cands.slice(0, max)) {

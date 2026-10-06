@@ -26,6 +26,7 @@ const chrome = (title, body) => `<!doctype html><html lang="en"><head><meta char
       <li><a href="https://www.arcgis.com/apps/webappviewer/index.html?id=${ROADS}">Road Closures Map</a></li>
       <li><a href="https://gis.smcgov.org/Html5Viewer/?viewer=raster">County Map Viewer</a></li>
       <li><a href="/planning/gis-map-zoning-and-other-info-0">Zoning</a></li>
+      ${Array.from({ length: 10 }, (_, i) => `<li><button type="button" aria-expanded="false">Menu ${i + 1}</button></li>`).join('')}
     </ul>
   </nav>
 </header>
@@ -76,6 +77,8 @@ const pages = {
     <li><a href="https://apps.geocortex.com/webviewer/?app=abc123">Geocortex cloud viewer</a></li>
     <li><a href="https://smc.apps.vertigisstudio.com/web/?app=parcels">VertiGIS Studio app</a></li></ul>`),
   '/hsa/find-services': chrome('Find Services Near You', `<h1>Find Services</h1><p><a href="https://www.google.com/maps/place/1+Tower+Rd+San+Mateo">Get Directions</a></p><button id="showmap" type="button">Show map</button><div id="mapwrap"></div>
+    <details id="offices"><summary>Office locations</summary><div id="officewrap"></div></details>
+    <script>document.getElementById('offices').addEventListener('toggle', () => { const f = document.createElement('iframe'); f.src = 'https://www.google.com/maps/d/embed?mid=2AbC_def456&hl=en'; f.width = 640; f.height = 480; document.getElementById('officewrap').appendChild(f); });</script>
     <script>document.getElementById('showmap').addEventListener('click', () => { const f = document.createElement('iframe'); f.src = 'https://www.google.com/maps/d/embed?mid=1XyZ_abc123&hl=en'; f.width = 640; f.height = 480; document.getElementById('mapwrap').appendChild(f); });</script>`),
   '/parks/seating': chrome('Seating chart', `<h1>Amphitheater seating chart</h1><figure><div id="seatmap" style="height:300px"></div><figcaption>Seat map — floor plan of the venue</figcaption></figure>
     <script src="/assets/fake-leaflet.js"></script><script>window.addEventListener('load', () => { L.map('seatmap', { crs: 'simple' }); });</script>`),
